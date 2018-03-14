@@ -2,6 +2,7 @@
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <util/delay.h>
+#include <math.h>
 
 //Пины подключения LCD дисплея
 #define RS       PC2
@@ -122,16 +123,17 @@ int main(void)
 	adc_init(3); // подключим АЦП к выводу PF3
 	// глобально разрешим прерывания
 	sei();
-	uint8_t data;
+	//uint8_t data;
 	
 	bool screen_for_temp = true;
 	bool sreen_for_ust = false;
+	int data;
 	uint8_t ust = 30;
 	
 	while (1) {
 		int dat = read_adc(3);
-		float datADC = 1023 - dat;
-		dat = 115 - dat/10.8;
+		double datADC = 1023 - dat;
+		data = 0.0000000268 * pow(datADC, 4) - 0.00004827 * pow(datADC, 3) + 0.031424 * pow(datADC, 2) - 8.404671 * datADC + 801.582; //fabs(datADC/3.15 + 43 - 111);
 		
 		if (PINA & (1<<0)) {
 			sreen_for_ust = true;
@@ -160,9 +162,9 @@ int main(void)
 			upper_line[4] = ' ';
 			upper_line[5] = '=';
 			upper_line[6] = ' ';
-			upper_line[7] = dat/100+0x30;
-			upper_line[8] = (dat/10)%10+0x30; //1024/1000=10.24/10=24
-			upper_line[9] = dat%10+0x30;
+			upper_line[7] = data/100+0x30;
+			upper_line[8] = (data/10)%10+0x30; //1024/1000=10.24/10=24
+			upper_line[9] = (data)%10+0x30;
 		};
 		 
 		if (sreen_for_ust) {
