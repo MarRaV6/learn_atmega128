@@ -19,12 +19,11 @@
 
 // Voltage Reference: AVCC pin
 #define ADC_VREF_TYPE ((0<<REFS1) | (1<<REFS0) | (0<<ADLAR))
+// ???
+#define max_n 11
 
 unsigned int read_adc(unsigned char adc_input);
-void adc_init(uint8_t PIN);
-float sa;
-
-#define max_n 11
+void adc_init(uint8_t);
 
 void InitStruct(void);
 int S3x(double datADC1);
@@ -37,6 +36,9 @@ typedef struct DependResist{
 
 
 DependResist dependResist[(max_n+1)]; // создаем калибровочную таблицу на max_n значений
+
+uint64_t time = 0;  // наше собственное время, 64бит должно хватить на пару миллиардов лет
+
 
 //------------------------------------------------------------------------------------------------------------------
 //Функция записи команды в LCD
@@ -176,7 +178,7 @@ ISR(TIMER1_OVF_vect)
         PORTB = 1;
     }
     
-    // todo инкрементировать наш собственный счетчик времени, по которому из главного цикла делать ШИМ
+    time++;  // инкрементировать наш собственный счетчик времени, по которому из главного цикла делать ШИМ
 }
 
 
@@ -190,15 +192,15 @@ int main(void) {
     
     DDRA = 0x00; // порта А полностью на ввод
     PORTA = 0x00;
+    
     DDRB = 0xFF;
     PORTB = 0x00;
     
     DDRD = 0xFF;
     PORTD = 0x00;
-    adc_init(3); // подключим АЦП к выводу PF3
-    // глобально разрешим прерывания
     
-    sei();  
+    adc_init(3); // подключим АЦП к выводу PF3
+    sei();  // глобально разрешим прерывания
     
     int data;
     char screen_for_temp = 'T';
@@ -209,8 +211,7 @@ int main(void) {
     InitStruct();
     
     while (1) {
-        int dat = read_adc(3);
-        float datADC = 1023 - dat;
+        float datADC = 1023 - read_adc(3);
         
         // float datADC = 470;
         // data = 0.0000000268 * pow(datADC, 4) - 0.00004827 * pow(datADC, 3) + 0.031424 * pow(datADC, 2) - 8.404671 * datADC + 801.582; //полином для преобразования температуры
