@@ -120,7 +120,6 @@ int speed = 7;              //Скорость движения точки
 
 void Timer_Init()
 {
-    
     // Timer/Counter 1 initialization
     // Clock source: System Clock
     // Clock value: 9,766 kHz
@@ -169,29 +168,31 @@ void Timer_Init()
 //interrupt [TIM1_OVF] void timer1_ovf_isr(void)
 ISR(TIMER1_OVF_vect)
 {
-    if (PORTB == 1)
-    {
+    // просигналим портом, что наш таймер вообще работает
+    if (PORTB == 1) {
         PORTB = 0;
     }
-    else
-    PORTB = 1;
+    else {
+        PORTB = 1;
+    }
+    
+    // todo инкрементировать наш собственный счетчик времени, по которому из главного цикла делать ШИМ
 }
 
 
-int main(void){     
+int main(void) {
     DDRC = 0xFF;    //Порт C - выход (подключен LCD дисплей)
     PORTC = 0;
     
     // глобально запретим прерывания
-    cli();  
+    cli();
     lcd_init(); //Инициализация дисплея
     
     DDRA = 0x00; // порта А полностью на ввод
     PORTA = 0x00;
     DDRB = 0xFF;
-    PORTB = 0;
+    PORTB = 0x00;
     
-    // DDRB = 0xFF;
     DDRD = 0xFF;
     PORTD = 0x00;
     adc_init(3); // подключим АЦП к выводу PF3
@@ -204,34 +205,35 @@ int main(void){
     char sreen_for_ust = 'F';
     uint8_t ust = 30;
     
+    Timer_Init();
     InitStruct();
     
-    while (1){
+    while (1) {
         int dat = read_adc(3);
-        //double datADC = 1023 - dat;
-        //data = 0.0000000268 * pow(datADC, 4) - 0.00004827 * pow(datADC, 3) + 0.031424 * pow(datADC, 2) - 8.404671 * datADC + 801.582; //полином для преобразования температуры
-        float datADC = 470;
+        float datADC = 1023 - dat;
+        
+        // float datADC = 470;
+        // data = 0.0000000268 * pow(datADC, 4) - 0.00004827 * pow(datADC, 3) + 0.031424 * pow(datADC, 2) - 8.404671 * datADC + 801.582; //полином для преобразования температуры
         
         data = S3x(datADC); 
         
-        if (PINA & (1<<0)) {            
+        // переключение экранов
+        // todo при переключении экранов обнулять upper_line и lower_line, иначе могут быть артефакты
+        if (PINA & (1<<0)) {
             screen_for_temp = 'F';
             sreen_for_ust   = 'T';
-        };
-        
-        if (PINA & (1<<1)) {            
+        } 
+        else if (PINA & (1<<1)) {
             screen_for_temp = 'T';
             sreen_for_ust   = 'F';
         };
         
         if (PINA & (1<<2)) {
             ust = ust + 1;
-        };
-        
-        if (PINA & (1<<3)) {
+        } else if (PINA & (1<<3)) {
             ust = ust - 1;
         };
-        
+
         if (screen_for_temp == 'T'){
             upper_line[0] = 'T';
             upper_line[1] = 'E';
@@ -257,8 +259,7 @@ int main(void){
             upper_line[8] = ust%10+0x30;
             upper_line[9] = ' ';
         }
-        
-        
+
         lower_line[0] = ' ';
         lower_line[1] = datADC/1000+0x30;
         lower_line[2] = ((int)datADC/100)%10+0x30;
@@ -270,9 +271,9 @@ int main(void){
         
         _delay_ms(100);
         
-        //OCR1A = (uint16_t)(0.2 * 0x3FF);
-        OCR1A = 64000;
-        //OCR1AL = 0x3FF;
+        // OCR1A = (uint16_t)(0.2 * 0x3FF);
+        // OCR1AL = 0x3FF;
+        OCR1A = 64000;  // значение таймера при котором сработает прерывание
     }
 }
 
