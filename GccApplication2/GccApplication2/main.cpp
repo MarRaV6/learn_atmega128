@@ -35,11 +35,6 @@ typedef struct DependResist{
 } DependResist;
 
 
-DependResist dependResist[(max_n+1)]; // создаем калибровочную таблицу на max_n значений
-
-uint64_t time = 0;  // наше собственное время, 64бит должно хватить на пару миллиардов лет
-
-
 //------------------------------------------------------------------------------------------------------------------
 //Функция записи команды в LCD
 void lcd_com(unsigned char p)                   // 'p' байт команды
@@ -114,9 +109,18 @@ void lcd_array( char x, char y, const char *str )
 
 char upper_line[17];        //Массив для верхней строки LCD дисплея
 char lower_line[17];        //Массив для нижней строки LCD дисплея
-int dot_pos = 0;            //Текущая позиция точки на экране
-int dot_pos_counter = 0;    //Счётчик для функционирования изменения скорости перемещения точки
-int speed = 7;              //Скорость движения точки
+
+DependResist dependResist[(max_n+1)]; // создаем калибровочную таблицу на max_n значений
+
+uint64_t time = 0;  // наше собственное время, 64бит должно хватить на пару миллиардов лет
+
+uint8_t pwm_load = 0;  // мера скважности
+uint16_t pwm_period = 100;  // количество отсчетов, которые формируют цикл ШИМ
+
+// enum Screen {
+//	screenTemp = 2,
+// 	screenTarget = 4
+// };
 
 //------------------------------------------------------------------------------------------------------------------
 
@@ -179,8 +183,7 @@ ISR(TIMER1_OVF_vect)
     }
     
     time++;  // инкрементировать наш собственный счетчик времени, по которому из главного цикла делать ШИМ
-}
-
+};
 
 int main(void) {
     DDRC = 0xFF;    //Порт C - выход (подключен LCD дисплей)
@@ -207,6 +210,8 @@ int main(void) {
     char sreen_for_ust = 'F';
     uint8_t ust = 30;
     
+    // enum Screen screen = screenTemp;
+    
     Timer_Init();
     InitStruct();
     
@@ -216,7 +221,7 @@ int main(void) {
         // float datADC = 470;
         // data = 0.0000000268 * pow(datADC, 4) - 0.00004827 * pow(datADC, 3) + 0.031424 * pow(datADC, 2) - 8.404671 * datADC + 801.582; //полином для преобразования температуры
         
-        data = S3x(datADC); 
+        data = S3x(datADC);
         
         // переключение экранов
         // todo при переключении экранов обнулять upper_line и lower_line, иначе могут быть артефакты
@@ -235,6 +240,7 @@ int main(void) {
             ust = ust - 1;
         };
 
+        // if (screen == screenTarget) {};
         if (screen_for_temp == 'T'){
             upper_line[0] = 'T';
             upper_line[1] = 'E';
@@ -269,9 +275,18 @@ int main(void) {
         
         lcd_array(1,0,upper_line);  //Вывод массива верхней строки на дисплей
         lcd_array(0,1,lower_line);  //Вывод массива нижней строки на дисплей
-        
-        _delay_ms(100);
-        
+
+        pwm_load = 50;  // todo с помощью PID регулятора определить скважность (pwm_load)
+
+        // наш собственный пролетарский ШИМ v0, потому что аппаратный для слабаков
+        if (time % pwm_period * 100 / pwm_period <= pwm_load) {
+            PORTC = 1;
+        } else {
+            PORTC = 0;
+};
+
+        _delay_ms(100);  // todo wtf
+
         // OCR1A = (uint16_t)(0.2 * 0x3FF);
         // OCR1AL = 0x3FF;
         OCR1A = 64000;  // значение таймера при котором сработает прерывание
