@@ -116,8 +116,8 @@ char lower_line[17];        //Массив для нижней строки LCD 
 DependResist dependResist[(max_n+1)]; // создаем калибровочную таблицу на max_n
 
 // enum Screen {
-//	screenTemp = 2,
-// 	screenTarget = 4
+//  screenTemp = 2,
+//  screenTarget = 4
 // };
 
 //------------------------------------------------------------------------------------------------------------------
@@ -146,7 +146,7 @@ void Timer_Init()
     TCNT1H=0x00;
     TCNT1L=0x00;
     ICR1H=0x00;
-    ICR1L=0x61;
+    ICR1L=0x00;
     OCR1AH=0x00;
     OCR1AL=0x00;
     OCR1BH=0x00;
@@ -183,7 +183,7 @@ int main(void) {
     char screen_for_temp = 'T';
     char sreen_for_ust = 'F';
     uint8_t ust = 30;
-    uint8_t pwm_load = 0;  // мера скважности
+    uint8_t pwm_load = 25;  // мера скважности
     
     // enum Screen screen = screenTemp;
     
@@ -211,8 +211,11 @@ int main(void) {
         
         if (PINA & (1<<2)) {
             ust = ust + 1;
+            // pwm_load = (pwm_load + 1) < 100 ? pwm_load + 1 : pwm_load;
+            
         } else if (PINA & (1<<3)) {
             ust = ust - 1;
+            // pwm_load = (pwm_load - 1) > 0 ? pwm_load - 1 : pwm_load;
         };
 
         // if (screen == screenTarget) {};
@@ -241,6 +244,21 @@ int main(void) {
             upper_line[8] = ust%10+0x30;
             upper_line[9] = ' ';
         }
+        
+        /*
+        if (sreen_for_ust == 'T'){
+            upper_line[0] = 'L';
+            upper_line[1] = 'O';
+            upper_line[2] = 'A';
+            upper_line[3] = 'D';
+            upper_line[4] = '=';
+            upper_line[5] = ' ';
+            upper_line[6] = pwm_load / 100+0x30;
+            upper_line[7] = (pwm_load / 10)%10+0x30; //1024/1000=10.24/10=24
+            upper_line[8] = (pwm_load)%10+0x30;
+            upper_line[9] = ' ';
+        } */
+
 
         lower_line[0] = ' ';
         lower_line[1] = datADC/1000+0x30;
@@ -251,10 +269,8 @@ int main(void) {
         lcd_array(1,0,upper_line);  //Вывод массива верхней строки на дисплей
         lcd_array(0,1,lower_line);  //Вывод массива нижней строки на дисплей
 
-        pwm_load = 0.5;  // todo с помощью PID регулятора определить скважность (pwm_load)
-        PWM_OCR = (uint16_t)(pwm_load * TIMER_TOP);  // изменим широту импулься PWM
-
-        // _delay_ms(100);  // todo wtf
+        // todo с помощью PID регулятора определить скважность (pwm_load)
+        PWM_OCR = (uint16_t)(pwm_load * 10.23);  // изменим широту импулься PWM
     }
 }
 
