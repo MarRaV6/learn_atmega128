@@ -125,6 +125,7 @@ void lcd_array( char x, char y, const char *str )
     while( *str != '\0' ) {          //цикл пока указатель существует
         lcd_dat( *str++ );
     };
+    
 }
 
 char upper_line[17];        //Массив для верхней строки LCD дисплея
@@ -202,16 +203,18 @@ int main(void) {
     preparations();
     sei();  // глобально разрешим прерывания
     
-    enum Screen screen = screenTemp;
+    //enum Screen screen = screenTemp;
+    enum Screen screen =  screenPWM;
     
     uint8_t data;
     float datADC;
     uint8_t target = 30;  // целевая температура
     uint8_t pwm_load = 0;  // мера скважности
-    char buff[5] = "     ";
+    char buff[5];
 
     Timer_Init();
     InitStruct();
+    
     int eps = 0;
     int epsOld = 0;
     int P = 0;
@@ -247,12 +250,13 @@ int main(void) {
         switch (screen) {
             case screenTemp: {
                 intToChars(buff, data);
-                snprintf(upper_line, 7 + sizeof buff - 1, "%s%s", "TEMP = ", buff);
+                snprintf(upper_line, 7 + sizeof buff, "%s%s", "TEMP = ", buff);
                 
                 memset(buff, ' ', 5);
                 
                 intToChars(buff, datADC);
                 snprintf(lower_line, sizeof buff, "%s%s", "", buff);
+                
                 
             } break;
             case screenTarget: {
@@ -261,9 +265,8 @@ int main(void) {
                 } else if (PINA & (1<<3)) {
                     target = (target - 1) > 0 ? target - 1 : target;
                 };
-                
                 intToChars(buff, target);
-                snprintf(upper_line, 7 + sizeof buff - 1, "%s%s", "TARG = ", buff);
+                snprintf(upper_line, 7 + sizeof buff, "%s%s", "TARG = ", buff);
                 
                 memset(lower_line, ' ', 17);
 
@@ -274,16 +277,19 @@ int main(void) {
                 } else if (PINA & (1<<3)) {
                     pwm_load = (pwm_load - 1) > 0 ? pwm_load - 1 : pwm_load;
                 };
-                
                 intToChars(buff, pwm_load);
-                snprintf(upper_line, 6 + sizeof buff - 1, "%s%s", "PWM = ", buff);
+                snprintf(upper_line, 6 + sizeof buff, "%s%s", "PWM = ", buff);
                 
                 memset(lower_line, ' ', 17);
             }
         }
         
+        
+        lcd_com(0x01);
         lcd_array(1,0, upper_line);
         lcd_array(1,1, lower_line);
+        
+        
         
         eps = target - data;
         
@@ -346,9 +352,10 @@ void intToChars(char *str, uint16_t valueInt){
     }
     
     int j = 1;
-    while(countInt >= 0){
+    while(countInt > 0){
         str[j++] = valueChar[--countInt]; 
     }
+    str[j]='\0';
 }
 //--------------------------------------------------------------------
 // 
@@ -402,57 +409,10 @@ int S3x(double datADC1){
 }   
 
 void InitStruct(void){
-    dependResist[1].code  = 300; dependResist[1].temp  = 28; 
-    dependResist[2].code  = 303; dependResist[2].temp  = 30; 
-    dependResist[3].code  = 322; dependResist[3].temp  = 35; 
-    dependResist[4].code  = 330; dependResist[4].temp  = 40; 
-    dependResist[5].code  = 337; dependResist[5].temp  = 42; 
-    dependResist[6].code  = 357; dependResist[6].temp  = 50; 
-    dependResist[7].code  = 370; dependResist[7].temp  = 55; 
-    dependResist[8].code  = 386; dependResist[8].temp  = 60; 
-    dependResist[9].code  = 395; dependResist[9].temp  = 65; 
-    dependResist[10].code = 409; dependResist[10].temp = 70; 
-    dependResist[11].code = 424; dependResist[11].temp = 75; 
+    int tempCode[max_n] = {300, 303, 322, 330, 337, 357, 370, 386, 395, 409, 424};
+    int tempT[max_n]    = { 28,  30,  35,  40,  42,  50,  55,  60,  65,  70,  75};      
+    for (uint8_t index = 1; index <= max_n; index++){
+        dependResist[index].code = tempCode[index];
+        dependResist[index].temp = tempT[index];
+    }
 }
-
-
-/*void PIDreg (void){
-  float u, i, kp, ki, kd, tE, pE;
-  switch (stepPID)
-  {
-    case actInit: //инициализация
-      stepPID = recE;
-      i = 0;
-      pE = 0; //предыдущее значение ошибки
-      
-      // инициализация коэффициентов Kp, Ki, Kd
-      kp = 1;
-      ki = 0.5;
-      kd = 0.1;
-      break;
-    case recE:   // получение текущей ошибки
-      u = 0;
-      tE = ;
-      break;
-    case actKi:    // вычисление интегрального коэф.
-      stepPID = actKp;
-      u = i + ki * tE;
-      i = u;
-      break;
-
-    case actKp:    // вычисление пропорционального коэф.
-      stepPID = actKd;
-      u += kp * tE;
-      break;
-
-    case actKd:    // вычисление дифференциального коэф.
-      stepPID = act;
-      u += kd * (tE - pE);
-      pE = tE;
-      break;
-    case act:  // воздействие
-      
-      break;
-  }
-}*/
-
