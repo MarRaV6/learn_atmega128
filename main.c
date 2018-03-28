@@ -3,7 +3,7 @@
  *
  * Created: 20.03.2018 17:19:28
  * Author : x_dea
- */ 
+ */
 
 #define F_CPU 10000000UL
 #include <avr/io.h>
@@ -21,38 +21,46 @@
 #define EN       PC3
 #define LCD_PORT PORTC
 
-
+// Коэффициенты PID
 #define Kp  1
 #define Ki  0.5
 #define Kd  0.1
 
-#define MAX_TARGET 120
-
-
+// АЦП
 // Voltage Reference: AVCC pin
 #define ADC_VREF_TYPE ((0<<REFS1) | (1<<REFS0) | (0<<ADLAR))
-// ???
-#define max_n 11
+#define ADC_PIN 3
 
+// Размер таблицы для сплайна
+#define TABLE_LEN 11
+
+// ШИМ
 #define TIMER_TOP 0x3FF
 #define PWM_OCR OCR1A
 
-unsigned int read_adc(unsigned char adc_input);
-void adc_init(uint8_t);
+// Максимальная температура уставки
+#define MAX_TARGET 120
 
+uint16_t read_adc(uint8_t adc_input);
+void adc_init(uint8_t);
 
 void intToChars(char *str, uint16_t valueInt);
 void clearBuff(char* str);
 
 void InitStruct(void);
-int S3x(double datADC1);
+int S3x(uint16_t datADC1);
 void spline_progonka(void);
 
-typedef struct DependResist{    
-    int  code; // значение кода ацп 
+typedef struct DependResist{
+    int  code; // значение кода ацп
     int  temp; // соотвествующее значение температуры для кода
 } DependResist;
 
+enum Screen {
+    screenTemp = 0,
+    screenTarget = 1,
+    screenPWM = 2
+};
 
 //------------------------------------------------------------------------------------------------------------------
 //Функция записи команды в LCD
@@ -127,20 +135,6 @@ void lcd_array( char x, char y, const char *str )
     };
 }
 
-char upper_line[17];        //Массив для верхней строки LCD дисплея
-char lower_line[17];        //Массив для нижней строки LCD дисплея
-
-DependResist dependResist[(max_n+1)]; // создаем калибровочную таблицу на max_n
-
-enum Screen {
-  screenTemp = 0,
-  screenTarget = 1,
-  screenPWM = 2
-};
-
-// enum PIDstep {actInit, recE, actKp, actKi, actKd, act};    // тип данных для ПИД
-// enum PIDstep stepPID = actInit;
-
 //------------------------------------------------------------------------------------------------------------------
 
 void Timer_Init()
@@ -182,18 +176,22 @@ void Timer_Init()
 
 void preparations(void){
     DDRC = 0xFF;    //Порт C - выход (подключен LCD дисплей)
-    PORTC = 0;
-    lcd_init(); //Инициализация дисплея
+    PORTC = 0x00;
 
-    DDRA = 0x00; // порта А полностью на ввод
+    // кнопки
+    DDRA = 0x00;
     PORTA = 0x00;
-    
+
+    // только PB5 на ШИМ
     DDRB = 0xFF;
     PORTB = 0x00;
-    
+
+    // не используем
     DDRD = 0xFF;
     PORTD = 0x00;
-    adc_init(3); // подключим АЦП к выводу PF3
+
+    lcd_init(); //Инициализация дисплея
+    adc_init(ADC_PIN); // подключим АЦП к выводу PF3
 }
 
 int main(void) {
@@ -201,37 +199,35 @@ int main(void) {
     cli();
     preparations();
     sei();  // глобально разрешим прерывания
-    
-    enum Screen screen = screenTemp;
-    
-    uint8_t data;
-    float datADC;
-    uint8_t target = 30;  // целевая температура
-    uint8_t pwm_load = 0;  // мера скважности
-    char buff[5] = "     ";
 
     Timer_Init();
     InitStruct();
-    int eps = 0;
-    int epsOld = 0;
-    int P = 0;
-    int I = 0;
-    int D = 0;
-    int U = 0;
-    
+
+    char upper_line[17];        //Массив для верхней строки LCD дисплея
+    char lower_line[17];        //Массив для нижней строки LCD дисплея
+
+    uint16_t tempADC;
+    int temp;               // реальная температура
+    int target = 30;        // целевая температура
+    int pwm_load = 0;       // мера скважности
+    char buff[5];           // временный буфер для вывода чисел
+
+    // PID
+    int eps = 0, epsOld = 0;
+    int U = 0, P = 0, I = 0, D = 0;
+
+    enum Screen screen = screenTemp;  // текущий экран
+
     while (1) {
-        datADC = 1023 - read_adc(3);
-        
-        // datADC = 470;
-        // data = 0.0000000268 * pow(datADC, 4) - 0.00004827 * pow(datADC, 3) + 0.031424 * pow(datADC, 2) - 8.404671 * datADC + 801.582; //полином для преобразования температуры
-        
-        data = S3x(datADC);
-        
+        tempADC = 1023 - read_adc(ADC_PIN);
+
+        // temp = 0.0000000268 * pow(tempADC, 4) - 0.00004827 * pow(tempADC, 3) + 0.031424 * pow(tempADC, 2) - 8.404671 * tempADC + 801.582; //полином для преобразования температуры
+        temp = S3x(tempADC);
+
         memset(upper_line, ' ', 17);
         memset(lower_line, ' ', 17);
-        
+
         // переключение экранов
-        // todo при переключении экранов обнулять upper_line и lower_line, иначе могут быть артефакты
         if (PINA & (1<<0)) {  // A0
             if (screen < screenPWM) {
                 screen++;
@@ -241,19 +237,19 @@ int main(void) {
                 screen--;
             }
         };
-        
+
         memset(buff, ' ', 5);
-        
+
         switch (screen) {
             case screenTemp: {
-                intToChars(buff, data);
+                intToChars(buff, temp);
                 snprintf(upper_line, 7 + sizeof buff - 1, "%s%s", "TEMP = ", buff);
-                
+
                 memset(buff, ' ', 5);
-                
-                intToChars(buff, datADC);
+
+                intToChars(buff, tempADC);
                 snprintf(lower_line, sizeof buff, "%s%s", "", buff);
-                
+
             } break;
             case screenTarget: {
                 if (PINA & (1<<2)) {
@@ -261,10 +257,10 @@ int main(void) {
                 } else if (PINA & (1<<3)) {
                     target = (target - 1) > 0 ? target - 1 : target;
                 };
-                
+
                 intToChars(buff, target);
                 snprintf(upper_line, 7 + sizeof buff - 1, "%s%s", "TARG = ", buff);
-                
+
                 memset(lower_line, ' ', 17);
 
             } break;
@@ -274,39 +270,37 @@ int main(void) {
                 } else if (PINA & (1<<3)) {
                     pwm_load = (pwm_load - 1) > 0 ? pwm_load - 1 : pwm_load;
                 };
-                
+
                 intToChars(buff, pwm_load);
                 snprintf(upper_line, 6 + sizeof buff - 1, "%s%s", "PWM = ", buff);
-                
+
                 memset(lower_line, ' ', 17);
             }
         }
-        
+
         lcd_array(1,0, upper_line);
         lcd_array(1,1, lower_line);
-        
-        eps = target - data;
-        
+
+        eps = target - temp;
         P = Kp * eps;
-        I = I - Ki*eps;
+        I = I - Ki * eps;
         D = Kd * (epsOld - eps);
         U = P + I + D;
-        
         epsOld = eps;
         pwm_load += U;
-        
-        if (pwm_load > 75) pwm_load = 75;
-        if (pwm_load < 0) pwm_load = 0;
-        if (eps < 0) pwm_load = 0;
-        // todo с помощью PID регулятора определить скважность (pwm_load)
+
+        if (pwm_load > 75) pwm_load = 75;   // ограничим ШИМ сверху
+        if (pwm_load < 0) pwm_load = 0;     // и снизу
+        if (eps < 0) pwm_load = 0;          // в случае превышения сразу выключим
+
         PWM_OCR = (uint16_t)(pwm_load * 10.23);  // изменим широту импулься PWM
-        
-        _delay_ms(100);
+
+        _delay_ms(100);  // убрать
     }
 }
 
 // Read the AD conversion result
-unsigned int read_adc(unsigned char adc_input){
+uint16_t read_adc(uint8_t adc_input){
     ADMUX=adc_input | ADC_VREF_TYPE;
     // Delay needed for the stabilization of the ADC input voltage
     _delay_ms(10);
@@ -335,55 +329,56 @@ void adc_init(uint8_t PIN) {
 //функция для перевода числа в строку
 void intToChars(char *str, uint16_t valueInt){
     char valueChar[5];
-    
+
     uint8_t flagMinus = valueInt < 0;
-    str[0] = flagMinus ? '-' : '+'; 
+    str[0] = flagMinus ? '-' : '+';
     int countInt = (valueInt == 0) ? 1 : 0;  // длина будующей строки
-    
+
     while(valueInt != 0){
         valueChar[countInt++] = valueInt % 10 + 0x30;
-        valueInt /= 10; 
+        valueInt /= 10;
     }
-    
+
     int j = 1;
     while(countInt >= 0){
-        str[j++] = valueChar[--countInt]; 
+        str[j++] = valueChar[--countInt];
     }
 }
 //--------------------------------------------------------------------
-// 
+//
 
-float l[max_n];
+DependResist dependResist[(TABLE_LEN+1)]; // создаем калибровочную таблицу на max_n
+float splineL[TABLE_LEN];
 
 void Spline_progonka(void){
-    float mu[max_n];
+    float mu[TABLE_LEN];
 
-    l[1] = 0;
+    splineL[1] = 0;
     mu[1] = 0;
-    
-    for (uint8_t i = 2; i < max_n; i++){    
-        float sig = (dependResist[i].code - dependResist[i-1].code ) / (dependResist[i+1].code - dependResist[i-1].code);   
-        float p = sig * l[i-1]+2;
-        l[i] = (sig - 1) / p;
-        mu[i] = (dependResist[i+1].temp - dependResist[i].temp) / (dependResist[i+1].code - dependResist[i].code) - 
+
+    for (uint8_t i = 2; i < TABLE_LEN; i++){
+        float sig = (dependResist[i].code - dependResist[i-1].code ) / (dependResist[i+1].code - dependResist[i-1].code);
+        float p = sig * splineL[i-1]+2;
+        splineL[i] = (sig - 1) / p;
+        mu[i] = (dependResist[i+1].temp - dependResist[i].temp) / (dependResist[i+1].code - dependResist[i].code) -
                 (dependResist[i].temp - dependResist[i-1].temp) / (dependResist[i].code - dependResist[i-1].code);
         mu[i] = (6* mu[i] / ( dependResist[i+1].code - dependResist[i-1].code) - sig * mu[i-1]) / p;
-    }   
-    l[max_n] = 0;       
-    for (int i = max_n-1; i > 0; i--){
-        l[i] = l[i] * l[i+1] + mu[i];
+    }
+    splineL[TABLE_LEN] = 0;
+    for (int i = TABLE_LEN-1; i > 0; i--){
+        splineL[i] = splineL[i] * splineL[i+1] + mu[i];
     }
 }
 
-int S3x(double datADC1){
+int S3x(uint16_t datADC1){
     Spline_progonka();
-    
+
     int klo = 1;
-    int khi = max_n;
-    int k = max_n;
+    int khi = TABLE_LEN;
+    int k = TABLE_LEN;
 
     while (k>1){
-        k = khi - klo;  
+        k = khi - klo;
         if (dependResist[k].code > datADC1){
             khi = k;
         } else {
@@ -395,64 +390,22 @@ int S3x(double datADC1){
     int h = dependResist[khi].code - dependResist[klo].code;
     float a = (dependResist[khi].code - datADC1) / h;
     float b = (datADC1 - dependResist[klo].code) / h;
-    
-    int s3x = (int) ( a * dependResist[klo].temp + b * dependResist[khi].temp + 
-                ((( pow(a,3) - a) * l[klo] + (pow(b,3) - b) * l[khi])) * (h * h) / 6  );    
-    return s3x;
-}   
 
-void InitStruct(void){
-    dependResist[1].code  = 300; dependResist[1].temp  = 28; 
-    dependResist[2].code  = 303; dependResist[2].temp  = 30; 
-    dependResist[3].code  = 322; dependResist[3].temp  = 35; 
-    dependResist[4].code  = 330; dependResist[4].temp  = 40; 
-    dependResist[5].code  = 337; dependResist[5].temp  = 42; 
-    dependResist[6].code  = 357; dependResist[6].temp  = 50; 
-    dependResist[7].code  = 370; dependResist[7].temp  = 55; 
-    dependResist[8].code  = 386; dependResist[8].temp  = 60; 
-    dependResist[9].code  = 395; dependResist[9].temp  = 65; 
-    dependResist[10].code = 409; dependResist[10].temp = 70; 
-    dependResist[11].code = 424; dependResist[11].temp = 75; 
+    int s3x = (int) ( a * dependResist[klo].temp + b * dependResist[khi].temp +
+                ((( pow(a,3) - a) * splineL[klo] + (pow(b,3) - b) * splineL[khi])) * (h * h) / 6  );
+    return s3x;
 }
 
-
-/*void PIDreg (void){
-  float u, i, kp, ki, kd, tE, pE;
-  switch (stepPID)
-  {
-    case actInit: //инициализация
-      stepPID = recE;
-      i = 0;
-      pE = 0; //предыдущее значение ошибки
-      
-      // инициализация коэффициентов Kp, Ki, Kd
-      kp = 1;
-      ki = 0.5;
-      kd = 0.1;
-      break;
-    case recE:   // получение текущей ошибки
-      u = 0;
-      tE = ;
-      break;
-    case actKi:    // вычисление интегрального коэф.
-      stepPID = actKp;
-      u = i + ki * tE;
-      i = u;
-      break;
-
-    case actKp:    // вычисление пропорционального коэф.
-      stepPID = actKd;
-      u += kp * tE;
-      break;
-
-    case actKd:    // вычисление дифференциального коэф.
-      stepPID = act;
-      u += kd * (tE - pE);
-      pE = tE;
-      break;
-    case act:  // воздействие
-      
-      break;
-  }
-}*/
-
+void InitStruct(void){
+    dependResist[1].code  = 300; dependResist[1].temp  = 28;
+    dependResist[2].code  = 303; dependResist[2].temp  = 30;
+    dependResist[3].code  = 322; dependResist[3].temp  = 35;
+    dependResist[4].code  = 330; dependResist[4].temp  = 40;
+    dependResist[5].code  = 337; dependResist[5].temp  = 42;
+    dependResist[6].code  = 357; dependResist[6].temp  = 50;
+    dependResist[7].code  = 370; dependResist[7].temp  = 55;
+    dependResist[8].code  = 386; dependResist[8].temp  = 60;
+    dependResist[9].code  = 395; dependResist[9].temp  = 65;
+    dependResist[10].code = 409; dependResist[10].temp = 70;
+    dependResist[11].code = 424; dependResist[11].temp = 75;
+}
