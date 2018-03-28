@@ -53,7 +53,15 @@ typedef struct DependResist{
     int  temp; // соотвествующее значение температуры для кода
 } DependResist;
 
+//------------------------------------------------------------------------------------------------------------------
+//------------------------------------------------------------------------------------------------------------------
 
+void usart0_init(uint16_t baud);
+void usart0_send(uint8_t data);
+void usart_print(char * str);
+void usart_println(char * str);
+
+//------------------------------------------------------------------------------------------------------------------
 //------------------------------------------------------------------------------------------------------------------
 //Функция записи команды в LCD
 void lcd_com(unsigned char p)                   // 'p' байт команды
@@ -224,7 +232,7 @@ int main(void) {
     
     while (1) {
         datADC = 1023 - read_adc(3);
-        
+                
         // datADC = 470;
         // data = 0.0000000268 * pow(datADC, 4) - 0.00004827 * pow(datADC, 3) + 0.031424 * pow(datADC, 2) - 8.404671 * datADC + 801.582; //полином для преобразования температуры
         
@@ -249,6 +257,7 @@ int main(void) {
         
         switch (screen) {
             case screenTemp: {
+                data = 123;
                 intToChars(buff, data);
                 snprintf(upper_line, 7 + sizeof buff, "%s%s", "TEMP = ", buff);
                 
@@ -265,6 +274,7 @@ int main(void) {
                 } else if (PINA & (1<<3)) {
                     target = (target - 1) > 0 ? target - 1 : target;
                 };
+                target = 9;
                 intToChars(buff, target);
                 snprintf(upper_line, 7 + sizeof buff, "%s%s", "TARG = ", buff);
                 
@@ -277,6 +287,7 @@ int main(void) {
                 } else if (PINA & (1<<3)) {
                     pwm_load = (pwm_load - 1) > 0 ? pwm_load - 1 : pwm_load;
                 };
+                pwm_load = 99;
                 intToChars(buff, pwm_load);
                 snprintf(upper_line, 6 + sizeof buff, "%s%s", "PWM = ", buff);
                 
@@ -415,4 +426,41 @@ void InitStruct(void){
         dependResist[index].code = tempCode[index];
         dependResist[index].temp = tempT[index];
     }
+}
+
+//--------------------------------------------------------------------
+// Функции usart 
+
+void usart0_init(uint16_t baud){
+    UCSR0B =    (1<<RXCIE0) |
+    (1<<RXEN0) |
+    (1<<TXEN0) |
+    (0<<UCSZ02);
+    UCSR0C =    (0<<UPM01) | (0<<UPM00) | (0<<USBS0) | (1<<UCSZ01) | (1<<UCSZ00);
+    
+    uint16_t speed = (F_CPU / 16) / baud - 1;
+    
+    UBRR0H = (speed >> 8) & 0xFF;
+    
+    UBRR0L = speed & 0xFF;
+}
+
+void usart0_send(uint8_t data) {
+    while (!(UCSR0A & (1<<UDRE0))) {}
+    
+    UDR0 = data;
+}
+
+void usart_print(char * str) {
+    while (*str != 0) {
+        usart0_send(*str);
+        
+        str++;
+    }
+}
+
+void usart_println(char * str) {
+    usart_print(str);
+    usart0_send('\r');
+    usart0_send('\n');
 }
