@@ -40,12 +40,12 @@
 
 // Максимальная температура уставки
 #define MAX_TARGET 120
+#define SCR_LEN 17
 
 uint16_t read_adc(uint8_t adc_input);
 void adc_init(uint8_t);
 
 void intToChars(char *str, uint16_t valueInt);
-void clearBuff(char* str);
 
 void InitStruct(void);
 int S3x(uint16_t datADC1);
@@ -127,12 +127,18 @@ void go_to(char pos, char line)
 }
 
 //Функция вывода строки на LCD, начиная с координат X и Y
-void lcd_array( char x, char y, const char *str )
+void lcd_array( char x, char y, const char *str, int size)
 {
     go_to(x,y);
-    while( *str != '\0' ) {          //цикл пока указатель существует
-        lcd_dat( *str++ );
+    int i = 0;
+    while( str[i] != EOF ) {          // цикл пока не конец строки
+        lcd_dat(str[i]);
+        i++;
     };
+}
+
+void clear_line(char* str, int size) {
+    memset(str, ' ', size);
 }
 
 //------------------------------------------------------------------------------------------------------------------
@@ -203,8 +209,8 @@ int main(void) {
     Timer_Init();
     InitStruct();
 
-    char upper_line[17];        //Массив для верхней строки LCD дисплея
-    char lower_line[17];        //Массив для нижней строки LCD дисплея
+    char upper_line[SCR_LEN];        //Массив для верхней строки LCD дисплея
+    char lower_line[SCR_LEN];        //Массив для нижней строки LCD дисплея
 
     uint16_t tempADC;
     int temp;               // реальная температура
@@ -224,8 +230,8 @@ int main(void) {
         // temp = 0.0000000268 * pow(tempADC, 4) - 0.00004827 * pow(tempADC, 3) + 0.031424 * pow(tempADC, 2) - 8.404671 * tempADC + 801.582; //полином для преобразования температуры
         temp = S3x(tempADC);
 
-        memset(upper_line, ' ', 17);
-        memset(lower_line, ' ', 17);
+        clear_line(upper_line, SCR_LEN);
+        clear_line(lower_line, SCR_LEN);
 
         // переключение экранов
         if (PINA & (1<<0)) {  // A0
@@ -238,17 +244,17 @@ int main(void) {
             }
         };
 
-        memset(buff, ' ', 5);
+        clear_line(buff, sizeof buff);
 
         switch (screen) {
             case screenTemp: {
                 intToChars(buff, temp);
-                snprintf(upper_line, 7 + sizeof buff - 1, "%s%s", "TEMP = ", buff);
+                snprintf(upper_line, SCR_LEN, "TEMP = %s", buff);
 
-                memset(buff, ' ', 5);
+                clear_line(buff, sizeof buff);
 
                 intToChars(buff, tempADC);
-                snprintf(lower_line, sizeof buff, "%s%s", "", buff);
+                snprintf(lower_line, SCR_LEN, "ADC = %s", buff);
 
             } break;
             case screenTarget: {
@@ -259,9 +265,9 @@ int main(void) {
                 };
 
                 intToChars(buff, target);
-                snprintf(upper_line, 7 + sizeof buff - 1, "%s%s", "TARG = ", buff);
+                snprintf(upper_line, SCR_LEN, "TARG = %s", buff);
 
-                memset(lower_line, ' ', 17);
+                clear_line(lower_line, SCR_LEN);
 
             } break;
             case screenPWM: {
@@ -272,14 +278,14 @@ int main(void) {
                 };
 
                 intToChars(buff, pwm_load);
-                snprintf(upper_line, 6 + sizeof buff - 1, "%s%s", "PWM = ", buff);
+                snprintf(upper_line, SCR_LEN, "PWM = %s", buff);
 
-                memset(lower_line, ' ', 17);
+                clear_line(lower_line, SCR_LEN);
             }
         }
 
-        lcd_array(1,0, upper_line);
-        lcd_array(1,1, lower_line);
+        lcd_array(1,0, upper_line, SCR_LEN);
+        lcd_array(1,1, lower_line, SCR_LEN);
 
         eps = target - temp;
         P = Kp * eps;
