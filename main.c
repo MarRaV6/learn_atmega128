@@ -22,6 +22,10 @@
 #define LCD_PORT PORTC
 
 
+#define Kp  1
+#define Ki  0.5
+#define Kd  0.1
+
 #define MAX_TARGET 120
 
 
@@ -134,6 +138,9 @@ enum Screen {
   screenPWM = 2
 };
 
+// enum PIDstep {actInit, recE, actKp, actKi, actKd, act};    // тип данных для ПИД
+// enum PIDstep stepPID = actInit;
+
 //------------------------------------------------------------------------------------------------------------------
 
 void Timer_Init()
@@ -197,14 +204,20 @@ int main(void) {
     
     enum Screen screen = screenTemp;
     
-    int data;
+    uint8_t data;
     float datADC;
     uint8_t target = 30;  // целевая температура
-    uint8_t pwm_load = 25;  // мера скважности
+    uint8_t pwm_load = 0;  // мера скважности
     char buff[5] = "     ";
 
     Timer_Init();
     InitStruct();
+    int eps = 0;
+    int epsOld = 0;
+    int P = 0;
+    int I = 0;
+    int D = 0;
+    int U = 0;
     
     while (1) {
         datADC = 1023 - read_adc(3);
@@ -271,7 +284,20 @@ int main(void) {
         
         lcd_array(1,0, upper_line);
         lcd_array(1,1, lower_line);
-
+        
+        eps = target - data;
+        
+        P = Kp * eps;
+        I = I - Ki*eps;
+        D = Kd * (epsOld - eps);
+        U = P + I + D;
+        
+        epsOld = eps;
+        pwm_load += U;
+        
+        if (pwm_load > 75) pwm_load = 75;
+        if (pwm_load < 0) pwm_load = 0;
+        if (eps < 0) pwm_load = 0;
         // todo с помощью PID регулятора определить скважность (pwm_load)
         PWM_OCR = (uint16_t)(pwm_load * 10.23);  // изменим широту импулься PWM
         
@@ -390,16 +416,15 @@ void InitStruct(void){
 }
 
 
-/*
-enum PIDstep {actInit, recE, actKp, actKi, actKd, act};    // тип данных для ПИД
-
-void PIDreg (void){
+/*void PIDreg (void){
   float u, i, kp, ki, kd, tE, pE;
-  switch (stepPID){
+  switch (stepPID)
+  {
     case actInit: //инициализация
-      stepPID =recE;
-      I = 0;
-      pE = 0;
+      stepPID = recE;
+      i = 0;
+      pE = 0; //предыдущее значение ошибки
+      
       // инициализация коэффициентов Kp, Ki, Kd
       kp = 1;
       ki = 0.5;
@@ -410,24 +435,24 @@ void PIDreg (void){
       tE = ;
       break;
     case actKi:    // вычисление интегрального коэф.
-      stepPID =actKp;
+      stepPID = actKp;
       u = i + ki * tE;
       i = u;
       break;
 
     case actKp:    // вычисление пропорционального коэф.
       stepPID = actKd;
-      U += kp * tE;
+      u += kp * tE;
       break;
 
     case actKd:    // вычисление дифференциального коэф.
       stepPID = act;
-      U += kd * (tE - pE);
+      u += kd * (tE - pE);
       pE = tE;
       break;
     case act:  // воздействие
       
       break;
   }
-}
-*/
+}*/
+
