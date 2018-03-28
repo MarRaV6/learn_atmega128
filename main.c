@@ -214,7 +214,7 @@ int main(void) {
 
     // PID
     int eps = 0, epsOld = 0;
-    int U = 0, P = 0, I = 0, D = 0;
+    float U = 0, P = 0, I = 0, D = 0;
 
     enum Screen screen = screenTemp;  // текущий экран
 
@@ -287,7 +287,8 @@ int main(void) {
         D = Kd * (epsOld - eps);
         U = P + I + D;
         epsOld = eps;
-        pwm_load += U;
+
+        pwm_load += U;  // вот тут округления с float до int
 
         if (pwm_load > 75) pwm_load = 75;   // ограничим ШИМ сверху
         if (pwm_load < 0) pwm_load = 0;     // и снизу
