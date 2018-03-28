@@ -51,6 +51,11 @@ void InitStruct(void);
 int S3x(uint16_t datADC1);
 void spline_progonka(void);
 
+void usart0_init(uint16_t baud);
+void usart0_send(uint8_t data);
+void usart_print(char * str);
+void usart_println(char * str);
+
 typedef struct DependResist{
     int  code; // значение кода ацп
     int  temp; // соотвествующее значение температуры для кода
@@ -62,6 +67,7 @@ enum Screen {
     screenPWM = 2
 };
 
+//------------------------------------------------------------------------------------------------------------------
 //------------------------------------------------------------------------------------------------------------------
 //Функция записи команды в LCD
 void lcd_com(unsigned char p)                   // 'p' байт команды
@@ -255,7 +261,6 @@ int main(void) {
 
                 intToChars(buff, tempADC);
                 snprintf(lower_line, SCR_LEN, "ADC = %s", buff);
-
             } break;
             case screenTarget: {
                 if (PINA & (1<<2)) {
@@ -284,6 +289,7 @@ int main(void) {
             }
         }
 
+        lcd_com(0x01);
         lcd_array(1,0, upper_line, SCR_LEN);
         lcd_array(1,1, lower_line, SCR_LEN);
 
@@ -347,9 +353,10 @@ void intToChars(char *str, uint16_t valueInt){
     }
 
     int j = 1;
-    while(countInt >= 0){
+    while(countInt > 0){
         str[j++] = valueChar[--countInt];
     }
+    str[j]='\0';
 }
 //--------------------------------------------------------------------
 //
@@ -404,15 +411,47 @@ int S3x(uint16_t datADC1){
 }
 
 void InitStruct(void){
-    dependResist[1].code  = 300; dependResist[1].temp  = 28;
-    dependResist[2].code  = 303; dependResist[2].temp  = 30;
-    dependResist[3].code  = 322; dependResist[3].temp  = 35;
-    dependResist[4].code  = 330; dependResist[4].temp  = 40;
-    dependResist[5].code  = 337; dependResist[5].temp  = 42;
-    dependResist[6].code  = 357; dependResist[6].temp  = 50;
-    dependResist[7].code  = 370; dependResist[7].temp  = 55;
-    dependResist[8].code  = 386; dependResist[8].temp  = 60;
-    dependResist[9].code  = 395; dependResist[9].temp  = 65;
-    dependResist[10].code = 409; dependResist[10].temp = 70;
-    dependResist[11].code = 424; dependResist[11].temp = 75;
+    int tempCode[TABLE_LEN] = {300, 303, 322, 330, 337, 357, 370, 386, 395, 409, 424};
+    int tempT[TABLE_LEN]    = { 28,  30,  35,  40,  42,  50,  55,  60,  65,  70,  75};
+    for (uint8_t index = 1; index <= TABLE_LEN; index++){
+        dependResist[index].code = tempCode[index];
+        dependResist[index].temp = tempT[index];
+    }
+}
+
+//--------------------------------------------------------------------
+// Функции usart
+
+void usart0_init(uint16_t baud){
+    UCSR0B =    (1<<RXCIE0) |
+    (1<<RXEN0) |
+    (1<<TXEN0) |
+    (0<<UCSZ02);
+    UCSR0C =    (0<<UPM01) | (0<<UPM00) | (0<<USBS0) | (1<<UCSZ01) | (1<<UCSZ00);
+
+    uint16_t speed = (F_CPU / 16) / baud - 1;
+
+    UBRR0H = (speed >> 8) & 0xFF;
+
+    UBRR0L = speed & 0xFF;
+}
+
+void usart0_send(uint8_t data) {
+    while (!(UCSR0A & (1<<UDRE0))) {}
+
+    UDR0 = data;
+}
+
+void usart_print(char * str) {
+    while (*str != 0) {
+        usart0_send(*str);
+
+        str++;
+    }
+}
+
+void usart_println(char * str) {
+    usart_print(str);
+    usart0_send('\r');
+    usart0_send('\n');
 }
