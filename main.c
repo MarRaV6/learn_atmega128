@@ -28,6 +28,9 @@
 unsigned int read_adc(unsigned char adc_input);
 void adc_init(uint8_t);
 
+
+void intToChars(char *str, uint16_t valueInt);
+
 void InitStruct(void);
 int S3x(double datADC1);
 void spline_progonka(void);
@@ -159,15 +162,12 @@ void Timer_Init()
     ETIMSK=(0<<TICIE3) | (0<<OCIE3A) | (0<<OCIE3B) | (0<<TOIE3) | (0<<OCIE3C) | (0<<OCIE1C);
 };
 
-int main(void) {
-    DDRC = 0xFF;    //Порт C - выход (подключен LCD дисплей)
-    PORTC = 0;
-    
-    // глобально запретим прерывания
-    cli();
-    lcd_init(); //Инициализация дисплея
-    
-    DDRA = 0x00; // порта А полностью на ввод
+void preparations(void){
+		DDRC = 0xFF;    //Порт C - выход (подключен LCD дисплей)
+	  PORTC = 0;
+	  lcd_init(); //Инициализация дисплея
+
+	  DDRA = 0x00; // порта А полностью на ввод
     PORTA = 0x00;
     
     DDRB = 0xFF;
@@ -175,18 +175,24 @@ int main(void) {
     
     DDRD = 0xFF;
     PORTD = 0x00;
-    
     adc_init(3); // подключим АЦП к выводу PF3
+
+    enum Screen screen = screenTemp;
+
+}
+
+int main(void) {
+    
+    
+    // глобально запретим прерывания
+    cli();
+    preparations();
     sei();  // глобально разрешим прерывания
     
     int data;
-    char screen_for_temp = 'T';
-    char sreen_for_ust = 'F';
     uint8_t ust = 30;
     uint8_t pwm_load = 25;  // мера скважности
-    
-    // enum Screen screen = screenTemp;
-    
+
     Timer_Init();
     InitStruct();
     
@@ -200,13 +206,11 @@ int main(void) {
         
         // переключение экранов
         // todo при переключении экранов обнулять upper_line и lower_line, иначе могут быть артефакты
-        if (PINA & (1<<0)) {
-            screen_for_temp = 'F';
-            sreen_for_ust   = 'T';
+        if (PINA & (1<<0)) {            
+						screen = screenTarget;
         } 
         else if (PINA & (1<<1)) {
-            screen_for_temp = 'T';
-            sreen_for_ust   = 'F';
+            screen = screenTemp;
         };
         
         if (PINA & (1<<2)) {
@@ -219,7 +223,11 @@ int main(void) {
         };
 
         // if (screen == screenTarget) {};
-        if (screen_for_temp == 'T'){
+        if (screen == screenTemp) {								
+						intToChars(buffInt, data);
+						snprintf(upper_line, sizeof upper_line, "%s%s", "TEMP = ", buffInt);
+						lcd_arrayXY(1,0, upper_line);
+						/*
             upper_line[0] = 'T';
             upper_line[1] = 'E';
             upper_line[2] = 'M';
@@ -230,9 +238,14 @@ int main(void) {
             upper_line[7] = data/100+0x30;
             upper_line[8] = (data/10)%10+0x30; //1024/1000=10.24/10=24
             upper_line[9] = (data)%10+0x30;
+            */
         };
         
-        if (sreen_for_ust == 'T'){
+        if (screen == screenTarget){
+		    		intToChars(buffInt, ust);
+            snprintf(upper_line, sizeof upper_line, "%s%s", "UST = ", ust);
+            lcd_arrayXY(1,0, upper_line);
+            /*
             upper_line[0] = 'U';
             upper_line[1] = 'S';
             upper_line[2] = 'T';
@@ -243,8 +256,8 @@ int main(void) {
             upper_line[7] = (ust/10)%10+0x30; //1024/1000=10.24/10=24
             upper_line[8] = ust%10+0x30;
             upper_line[9] = ' ';
+            */
         }
-        
         /*
         if (sreen_for_ust == 'T'){
             upper_line[0] = 'L';
@@ -259,7 +272,11 @@ int main(void) {
             upper_line[9] = ' ';
         } */
 
+        intToChars(buffInt, datADC);
+				snprintf(lower_line, sizeof lower_line, "%s%s", ' ', buffInt);
+				lcd_arrayXY(0,1, lower_line);
 
+        /*
         lower_line[0] = ' ';
         lower_line[1] = datADC/1000+0x30;
         lower_line[2] = ((int)datADC/100)%10+0x30;
@@ -268,6 +285,7 @@ int main(void) {
         
         lcd_array(1,0,upper_line);  //Вывод массива верхней строки на дисплей
         lcd_array(0,1,lower_line);  //Вывод массива нижней строки на дисплей
+				*/
 
         // todo с помощью PID регулятора определить скважность (pwm_load)
         PWM_OCR = (uint16_t)(pwm_load * 10.23);  // изменим широту импулься PWM
@@ -300,6 +318,25 @@ void adc_init(uint8_t PIN) {
     // предделитель АЦП 128
 }
 
+//--------------------------------------------------------------------
+//функция для перевода числа в строку
+void intToChars(char *str, uint16_t valueInt){
+	bool flagMinus = valueInt < 0;	
+	char valueChar[5];
+	int countInt = (valueInt == 0) ? 1 : 0;
+	while(valueInt!=0){
+		valueChar[countInt++] = valueInt%10 + '0';
+		valueInt /= 10;	
+	}	
+	
+	int j = 1;
+	while(countInt >= 0){
+		str[j++] = valueChar[--countInt]; 
+	}
+	str[0] = flagMinus ? '-' : '+';	
+}
+//--------------------------------------------------------------------
+// 
 
 float l[max_n];
 
@@ -362,3 +399,46 @@ void InitStruct(void){
     dependResist[10].code = 409; dependResist[10].temp = 70; 
     dependResist[11].code = 424; dependResist[11].temp = 75; 
 }
+
+
+/*
+enum PIDstep {actInit, recE, actKp, actKi, actKd, act};    // тип данных для ПИД
+
+void PIDreg (void){
+  float u, i, kp, ki, kd, tE, pE;
+  switch (stepPID){
+    case actInit: //инициализация
+      stepPID =recE;
+      I = 0;
+      pE = 0;
+      // инициализация коэффициентов Kp, Ki, Kd
+      kp = 1;
+      ki = 0.5;
+      kd = 0.1;
+      break;
+    case recE:   // получение текущей ошибки
+      u = 0;
+      tE = ;
+      break;
+    case actKi:    // вычисление интегрального коэф.
+      stepPID =actKp;
+      u = i + ki * tE;
+      i = u;
+      break;
+
+    case actKp:    // вычисление пропорционального коэф.
+      stepPID = actKd;
+      U += kp * tE;
+      break;
+
+    case actKd:    // вычисление дифференциального коэф.
+      stepPID = act;
+      U += kd * (tE - pE);
+      pE = tE;
+      break;
+    case act:  // воздействие
+      
+      break;
+  }
+}
+*/
