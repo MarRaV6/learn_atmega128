@@ -133,11 +133,11 @@ void go_to(char pos, char line)
 }
 
 //Функция вывода строки на LCD, начиная с координат X и Y
-void lcd_array( char x, char y, const char *str, int size)
+void lcd_array( char x, char y, const char *str)
 {
     go_to(x,y);
     int i = 0;
-    while( str[i] != EOF ) {          // цикл пока не конец строки
+    while( str[i] != '\0' ) {          // цикл пока не конец строки
         lcd_dat(str[i]);
         i++;
     };
@@ -290,8 +290,8 @@ int main(void) {
         }
 
         lcd_com(0x01);
-        lcd_array(1,0, upper_line, SCR_LEN);
-        lcd_array(1,1, lower_line, SCR_LEN);
+        lcd_array(1,0, upper_line);
+        lcd_array(1,1, lower_line);
 
         eps = target - temp;
         P = Kp * eps;
