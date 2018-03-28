@@ -10,11 +10,19 @@
 #include <avr/interrupt.h>
 #include <util/delay.h>
 #include <math.h>
+#include <stdio.h>
+#include <string.h>
+
+#define true 1
+#define false 0
 
 //Пины подключения LCD дисплея
 #define RS       PC2
 #define EN       PC3
 #define LCD_PORT PORTC
+
+
+#define MAX_TARGET 120
 
 
 // Voltage Reference: AVCC pin
@@ -30,6 +38,7 @@ void adc_init(uint8_t);
 
 
 void intToChars(char *str, uint16_t valueInt);
+void clearBuff(char* str);
 
 void InitStruct(void);
 int S3x(double datADC1);
@@ -109,8 +118,9 @@ void go_to(char pos, char line)
 void lcd_array( char x, char y, const char *str )
 {
     go_to(x,y);
-    while( *str )           //цикл пока указатель существует
-    lcd_dat( *str++ );  //выводить строку
+    while( *str != '\0' ) {          //цикл пока указатель существует
+        lcd_dat( *str++ );
+    };
 }
 
 char upper_line[17];        //Массив для верхней строки LCD дисплея
@@ -118,10 +128,11 @@ char lower_line[17];        //Массив для нижней строки LCD 
 
 DependResist dependResist[(max_n+1)]; // создаем калибровочную таблицу на max_n
 
-// enum Screen {
-//  screenTemp = 2,
-//  screenTarget = 4
-// };
+enum Screen {
+  screenTemp = 0,
+  screenTarget = 1,
+  screenPWM = 2
+};
 
 //------------------------------------------------------------------------------------------------------------------
 
@@ -163,11 +174,11 @@ void Timer_Init()
 };
 
 void preparations(void){
-		DDRC = 0xFF;    //Порт C - выход (подключен LCD дисплей)
-	  PORTC = 0;
-	  lcd_init(); //Инициализация дисплея
+    DDRC = 0xFF;    //Порт C - выход (подключен LCD дисплей)
+    PORTC = 0;
+    lcd_init(); //Инициализация дисплея
 
-	  DDRA = 0x00; // порта А полностью на ввод
+    DDRA = 0x00; // порта А полностью на ввод
     PORTA = 0x00;
     
     DDRB = 0xFF;
@@ -176,119 +187,95 @@ void preparations(void){
     DDRD = 0xFF;
     PORTD = 0x00;
     adc_init(3); // подключим АЦП к выводу PF3
-
-    enum Screen screen = screenTemp;
-
 }
 
 int main(void) {
-    
-    
     // глобально запретим прерывания
     cli();
     preparations();
     sei();  // глобально разрешим прерывания
     
+    enum Screen screen = screenTemp;
+    
     int data;
-    uint8_t ust = 30;
+    float datADC;
+    uint8_t target = 30;  // целевая температура
     uint8_t pwm_load = 25;  // мера скважности
+    char buff[5] = "     ";
 
     Timer_Init();
     InitStruct();
     
     while (1) {
-        float datADC = 1023 - read_adc(3);
+        datADC = 1023 - read_adc(3);
         
-        // float datADC = 470;
+        // datADC = 470;
         // data = 0.0000000268 * pow(datADC, 4) - 0.00004827 * pow(datADC, 3) + 0.031424 * pow(datADC, 2) - 8.404671 * datADC + 801.582; //полином для преобразования температуры
         
         data = S3x(datADC);
         
+        memset(upper_line, ' ', 17);
+        memset(lower_line, ' ', 17);
+        
         // переключение экранов
         // todo при переключении экранов обнулять upper_line и lower_line, иначе могут быть артефакты
-        if (PINA & (1<<0)) {            
-						screen = screenTarget;
-        } 
-        else if (PINA & (1<<1)) {
-            screen = screenTemp;
+        if (PINA & (1<<0)) {  // A0
+            if (screen < screenPWM) {
+                screen++;
+            }
+        } else if (PINA & (1<<1)) {  // A1
+            if (screen > screenTemp) {
+                screen--;
+            }
         };
         
-        if (PINA & (1<<2)) {
-            ust = ust + 1;
-            // pwm_load = (pwm_load + 1) < 100 ? pwm_load + 1 : pwm_load;
-            
-        } else if (PINA & (1<<3)) {
-            ust = ust - 1;
-            // pwm_load = (pwm_load - 1) > 0 ? pwm_load - 1 : pwm_load;
-        };
+        memset(buff, ' ', 5);
+        
+        switch (screen) {
+            case screenTemp: {
+                intToChars(buff, data);
+                snprintf(upper_line, 7 + sizeof buff - 1, "%s%s", "TEMP = ", buff);
+                
+                memset(buff, ' ', 5);
+                
+                intToChars(buff, datADC);
+                snprintf(lower_line, sizeof buff, "%s%s", "", buff);
+                
+            } break;
+            case screenTarget: {
+                if (PINA & (1<<2)) {
+                    target = (target + 1) < MAX_TARGET ? target + 1 : target;
+                } else if (PINA & (1<<3)) {
+                    target = (target - 1) > 0 ? target - 1 : target;
+                };
+                
+                intToChars(buff, target);
+                snprintf(upper_line, 7 + sizeof buff - 1, "%s%s", "TARG = ", buff);
+                
+                memset(lower_line, ' ', 17);
 
-        // if (screen == screenTarget) {};
-        if (screen == screenTemp) {								
-						intToChars(buffInt, data);
-						snprintf(upper_line, sizeof upper_line, "%s%s", "TEMP = ", buffInt);
-						lcd_arrayXY(1,0, upper_line);
-						/*
-            upper_line[0] = 'T';
-            upper_line[1] = 'E';
-            upper_line[2] = 'M';
-            upper_line[3] = 'P';
-            upper_line[4] = ' ';
-            upper_line[5] = '=';
-            upper_line[6] = ' ';
-            upper_line[7] = data/100+0x30;
-            upper_line[8] = (data/10)%10+0x30; //1024/1000=10.24/10=24
-            upper_line[9] = (data)%10+0x30;
-            */
-        };
-        
-        if (screen == screenTarget){
-		    		intToChars(buffInt, ust);
-            snprintf(upper_line, sizeof upper_line, "%s%s", "UST = ", ust);
-            lcd_arrayXY(1,0, upper_line);
-            /*
-            upper_line[0] = 'U';
-            upper_line[1] = 'S';
-            upper_line[2] = 'T';
-            upper_line[3] = ' ';
-            upper_line[4] = '=';
-            upper_line[5] = ' ';
-            upper_line[6] = ust/100+0x30;
-            upper_line[7] = (ust/10)%10+0x30; //1024/1000=10.24/10=24
-            upper_line[8] = ust%10+0x30;
-            upper_line[9] = ' ';
-            */
+            } break;
+            case screenPWM: {
+                if (PINA & (1<<2)) {
+                    pwm_load = (pwm_load + 1) < 100 ? pwm_load + 1 : pwm_load;
+                } else if (PINA & (1<<3)) {
+                    pwm_load = (pwm_load - 1) > 0 ? pwm_load - 1 : pwm_load;
+                };
+                
+                intToChars(buff, pwm_load);
+                snprintf(upper_line, 6 + sizeof buff - 1, "%s%s", "PWM = ", buff);
+                
+                memset(lower_line, ' ', 17);
+            }
         }
-        /*
-        if (sreen_for_ust == 'T'){
-            upper_line[0] = 'L';
-            upper_line[1] = 'O';
-            upper_line[2] = 'A';
-            upper_line[3] = 'D';
-            upper_line[4] = '=';
-            upper_line[5] = ' ';
-            upper_line[6] = pwm_load / 100+0x30;
-            upper_line[7] = (pwm_load / 10)%10+0x30; //1024/1000=10.24/10=24
-            upper_line[8] = (pwm_load)%10+0x30;
-            upper_line[9] = ' ';
-        } */
-
-        intToChars(buffInt, datADC);
-				snprintf(lower_line, sizeof lower_line, "%s%s", ' ', buffInt);
-				lcd_arrayXY(0,1, lower_line);
-
-        /*
-        lower_line[0] = ' ';
-        lower_line[1] = datADC/1000+0x30;
-        lower_line[2] = ((int)datADC/100)%10+0x30;
-        lower_line[3] = ((int)datADC/10)%10+0x30;//%10+0x30;
-        lower_line[4] = ((int)datADC)%10+0x30;
         
-        lcd_array(1,0,upper_line);  //Вывод массива верхней строки на дисплей
-        lcd_array(0,1,lower_line);  //Вывод массива нижней строки на дисплей
-				*/
+        lcd_array(1,0, upper_line);
+        lcd_array(1,1, lower_line);
 
         // todo с помощью PID регулятора определить скважность (pwm_load)
         PWM_OCR = (uint16_t)(pwm_load * 10.23);  // изменим широту импулься PWM
+        
+        _delay_ms(100);
     }
 }
 
@@ -321,19 +308,21 @@ void adc_init(uint8_t PIN) {
 //--------------------------------------------------------------------
 //функция для перевода числа в строку
 void intToChars(char *str, uint16_t valueInt){
-	bool flagMinus = valueInt < 0;	
-	char valueChar[5];
-	int countInt = (valueInt == 0) ? 1 : 0;
-	while(valueInt!=0){
-		valueChar[countInt++] = valueInt%10 + '0';
-		valueInt /= 10;	
-	}	
-	
-	int j = 1;
-	while(countInt >= 0){
-		str[j++] = valueChar[--countInt]; 
-	}
-	str[0] = flagMinus ? '-' : '+';	
+    char valueChar[5];
+    
+    uint8_t flagMinus = valueInt < 0;
+    str[0] = flagMinus ? '-' : '+'; 
+    int countInt = (valueInt == 0) ? 1 : 0;  // длина будующей строки
+    
+    while(valueInt != 0){
+        valueChar[countInt++] = valueInt % 10 + 0x30;
+        valueInt /= 10; 
+    }
+    
+    int j = 1;
+    while(countInt >= 0){
+        str[j++] = valueChar[--countInt]; 
+    }
 }
 //--------------------------------------------------------------------
 // 
