@@ -61,8 +61,7 @@ typedef struct DependResist{
 
 enum Screen {
     screenTemp = 0,
-    screenTarget = 1,
-    screenPWM = 2
+    screenPWM = 1
 };
 
 //------------------------------------------------------------------------------------------------------------------
@@ -249,17 +248,14 @@ int main(void) {
 
         switch (screen) {
             case screenTemp: {
+                 if (PINA & (1<<2)) {
+                     target = (target + 1) < MAX_TARGET ? target + 1 : target;
+                     } else if (PINA & (1<<3)) {
+                     target = (target - 1) > 0 ? target - 1 : target;
+                 };
+                 
                 snprintf(upper_line, SCR_LEN, "T: %i, ADC: %i", temp, tempADC);
-            } break;
-            case screenTarget: {
-                if (PINA & (1<<2)) {
-                    target = (target + 1) < MAX_TARGET ? target + 1 : target;
-                } else if (PINA & (1<<3)) {
-                    target = (target - 1) > 0 ? target - 1 : target;
-                };
-
-                snprintf(upper_line, SCR_LEN, "TARG: %i", target);
-
+                snprintf(lower_line, SCR_LEN, "TARG: %i", target);
             } break;
             case screenPWM: {
                 if (PINA & (1<<2)) {
