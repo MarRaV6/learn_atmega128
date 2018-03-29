@@ -45,8 +45,6 @@
 uint16_t read_adc(uint8_t adc_input);
 void adc_init(uint8_t);
 
-void intToChars(char *str, uint16_t valueInt);
-
 void InitStruct(void);
 int S3x(uint16_t datADC1);
 void spline_progonka(void);
@@ -222,7 +220,6 @@ int main(void) {
     int temp;               // реальная температура
     int target = 30;        // целевая температура
     int pwm_load = 0;       // мера скважности
-    char buff[5];           // временный буфер для вывода чисел
 
     // PID
     int eps = 0, epsOld = 0;
@@ -236,9 +233,6 @@ int main(void) {
         // temp = 0.0000000268 * pow(tempADC, 4) - 0.00004827 * pow(tempADC, 3) + 0.031424 * pow(tempADC, 2) - 8.404671 * tempADC + 801.582; //полином для преобразования температуры
         temp = S3x(tempADC);
 
-        clear_line(upper_line, SCR_LEN);
-        clear_line(lower_line, SCR_LEN);
-
         // переключение экранов
         if (PINA & (1<<0)) {  // A0
             if (screen < screenPWM) {
@@ -250,17 +244,12 @@ int main(void) {
             }
         };
 
-        clear_line(buff, sizeof buff);
+        clear_line(upper_line, SCR_LEN);
+        clear_line(lower_line, SCR_LEN);
 
         switch (screen) {
             case screenTemp: {
-                intToChars(buff, temp);
-                snprintf(upper_line, SCR_LEN, "TEMP = %s", buff);
-
-                clear_line(buff, sizeof buff);
-
-                intToChars(buff, tempADC);
-                snprintf(lower_line, SCR_LEN, "ADC = %s", buff);
+                snprintf(upper_line, SCR_LEN, "T: %i, ADC: %i", temp, tempADC);
             } break;
             case screenTarget: {
                 if (PINA & (1<<2)) {
@@ -269,10 +258,7 @@ int main(void) {
                     target = (target - 1) > 0 ? target - 1 : target;
                 };
 
-                intToChars(buff, target);
-                snprintf(upper_line, SCR_LEN, "TARG = %s", buff);
-
-                clear_line(lower_line, SCR_LEN);
+                snprintf(upper_line, SCR_LEN, "TARG: %i", target);
 
             } break;
             case screenPWM: {
@@ -282,14 +268,11 @@ int main(void) {
                     pwm_load = (pwm_load - 1) > 0 ? pwm_load - 1 : pwm_load;
                 };
 
-                intToChars(buff, pwm_load);
-                snprintf(upper_line, SCR_LEN, "PWM = %s", buff);
-
-                clear_line(lower_line, SCR_LEN);
+                snprintf(upper_line, SCR_LEN, "%i%% U:%i E:%i", pwm_load, (int)U, eps); 
+                snprintf(lower_line, SCR_LEN, "PID:%i,%i,%i", (int)P, (int)I, (int)D);
             }
         }
 
-        lcd_com(0x01);
         lcd_array(1,0, upper_line);
         lcd_array(1,1, lower_line);
 
@@ -338,26 +321,6 @@ void adc_init(uint8_t PIN) {
     // предделитель АЦП 128
 }
 
-//--------------------------------------------------------------------
-//функция для перевода числа в строку
-void intToChars(char *str, uint16_t valueInt){
-    char valueChar[5];
-
-    uint8_t flagMinus = valueInt < 0;
-    str[0] = flagMinus ? '-' : '+';
-    int countInt = (valueInt == 0) ? 1 : 0;  // длина будующей строки
-
-    while(valueInt != 0){
-        valueChar[countInt++] = valueInt % 10 + 0x30;
-        valueInt /= 10;
-    }
-
-    int j = 1;
-    while(countInt > 0){
-        str[j++] = valueChar[--countInt];
-    }
-    str[j]='\0';
-}
 //--------------------------------------------------------------------
 //
 
