@@ -15,9 +15,6 @@
 
 #include "kalman.h"
 
-#define RS       PC2
-#define EN       PC3
-
 #define true 1
 #define false 0
 
