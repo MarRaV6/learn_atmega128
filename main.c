@@ -14,15 +14,18 @@
 #include <string.h>
 
 #include "kalman.h"
-#include "lcd.h"
+
+#define RS       PC2
+#define EN       PC3
 
 #define true 1
 #define false 0
 
 // Коэффициенты PID
-#define Kp  1
-#define Ki  0.5
+#define Kp  1.5
+#define Ki  0.25
 #define Kd  0.1
+#define MAX_I 150
 
 // АЦП
 // Voltage Reference: AVCC pin
@@ -40,11 +43,23 @@
 #define MAX_TARGET 120
 #define SCR_LEN 17
 
+//Пины подключения LCD дисплея
+#define RS       PC2
+#define EN       PC3
+#define LCD_PORT PORTC
+
+void lcd_com(unsigned char p);
+void lcd_dat(unsigned char p);
+void lcd_clear(void);
+void lcd_init(void);
+void go_to(char pos, char line);
+void lcd_array( char x, char y, const char *str);
+
 uint16_t read_adc(uint8_t adc_input);
 void adc_init(uint8_t);
 
 void InitStruct(void);
-int S3x(uint16_t datADC1);
+uint16_t S3x(double datADC1);
 void spline_progonka(void);
 
 void usart0_init(uint16_t baud);
@@ -108,9 +123,6 @@ void Timer_Init()
 };
 
 void preparations(void){
-    DDRC = 0xFF;    //Порт C - выход (подключен LCD дисплей)
-    PORTC = 0x00;
-
     // кнопки
     DDRA = 0x00;
     PORTA = 0x00;
@@ -118,12 +130,16 @@ void preparations(void){
     // только PB5 на ШИМ
     DDRB = 0xFF;
     PORTB = 0x00;
+    
+    DDRC = 0xFF;    //Порт C - выход (подключен LCD дисплей)
+    PORTC = 0x00;
 
+    lcd_init(); //Инициализация дисплея
+    
     // не используем
     DDRD = 0xFF;
     PORTD = 0x00;
-
-    lcd_init(); //Инициализация дисплея
+    
     adc_init(ADC_PIN); // подключим АЦП к выводу PF3
 }
 
@@ -131,21 +147,22 @@ int main(void) {
     // глобально запретим прерывания
     cli();
     preparations();
+    Timer_Init();
+    // usart0_init(9600);
     sei();  // глобально разрешим прерывания
 
-    Timer_Init();
     InitStruct();
 
     char upper_line[SCR_LEN];        //Массив для верхней строки LCD дисплея
     char lower_line[SCR_LEN];        //Массив для нижней строки LCD дисплея
 
     uint16_t tempADC;
-    int temp;               // реальная температура
-    int target = 30;        // целевая температура
-    int pwm_load = 0;       // мера скважности
+    int16_t temp;               // реальная температура
+    int16_t target = 30;        // целевая температура
+    int16_t pwm_load = 0;       // мера скважности
 
     // PID
-    int eps = 0, epsOld = 0;
+    int16_t eps = 0, epsOld = 0;
     float U = 0, P = 0, I = 0, D = 0;
 
     enum Screen screen = screenTemp;  // текущий экран
@@ -155,13 +172,15 @@ int main(void) {
 
         // temp = 0.0000000268 * pow(tempADC, 4) - 0.00004827 * pow(tempADC, 3) + 0.031424 * pow(tempADC, 2) - 8.404671 * tempADC + 801.582; //полином для преобразования температуры
         temp = S3x(tempADC);
+        
+        // usart_println("Hello!");
 
         // переключение экранов
-        if (PINA & (1<<0)) {  // A0
+        if (PINA & (1<<1)) {  // A1
             if (screen < screenPWM) {
                 screen++;
             }
-        } else if (PINA & (1<<1)) {  // A1
+        } else if (PINA & (1<<0)) {  // A0
             if (screen > screenTemp) {
                 screen--;
             }
@@ -178,8 +197,10 @@ int main(void) {
                      target = (target - 1) > 0 ? target - 1 : target;
                  };
                  
-                snprintf(upper_line, SCR_LEN, "T: %i, ADC: %i", temp, tempADC);
-                snprintf(lower_line, SCR_LEN, "TARG: %i", target);
+                 snprintf(upper_line, SCR_LEN, "T: %i, ADC: %i", temp, tempADC);
+                 snprintf(lower_line, SCR_LEN, "TARG: %i", target);
+                 
+                 lcd_clear();
             } break;
             case screenPWM: {
                 if (PINA & (1<<2)) {
@@ -190,28 +211,36 @@ int main(void) {
 
                 snprintf(upper_line, SCR_LEN, "%i%% U:%i E:%i", pwm_load, (int)U, eps); 
                 snprintf(lower_line, SCR_LEN, "PID:%i,%i,%i", (int)P, (int)I, (int)D);
+                
+                lcd_clear();
             }
         }
-
+        
         lcd_array(1,0, upper_line);
         lcd_array(1,1, lower_line);
 
         eps = target - temp;
         P = Kp * eps;
-        I = I - Ki * eps;
+        I = I + Ki * eps;  // в методичке ошибка - интеграл это сумма
         D = Kd * (epsOld - eps);
+        
+        if (fabs(I) > MAX_I) {
+            I = MAX_I * ((I > 0) ? 1 : -1);
+        }
+        
         U = P + I + D;
         epsOld = eps;
 
-        pwm_load += U;  // вот тут округления с float до int
+        pwm_load = (int) U;  // вот тут округления с float до int
 
         if (pwm_load > 75) pwm_load = 75;   // ограничим ШИМ сверху
         if (pwm_load < 0) pwm_load = 0;     // и снизу
-        if (eps < 0) pwm_load = 0;          // в случае превышения сразу выключим
+        
+        if (eps < 0) pwm_load = 0;          // в случае превышения сразу выключим обогревание
 
         PWM_OCR = (uint16_t)(pwm_load * 10.23);  // изменим широту импулься PWM
 
-        _delay_ms(100);  // убрать
+        _delay_ms(10);  // убрать
         
         //kalman_filter()
     }
@@ -269,7 +298,7 @@ void Spline_progonka(void){
     }
 }
 
-int S3x(uint16_t datADC1){
+uint16_t S3x(double datADC1){
     Spline_progonka();
 
     int klo = 1;
@@ -290,9 +319,8 @@ int S3x(uint16_t datADC1){
     float a = (dependResist[khi].code - datADC1) / h;
     float b = (datADC1 - dependResist[klo].code) / h;
 
-    int s3x = (int) ( a * dependResist[klo].temp + b * dependResist[khi].temp +
+    return (int16_t) ( a * dependResist[klo].temp + b * dependResist[khi].temp +
                 ((( pow(a,3) - a) * splineL[klo] + (pow(b,3) - b) * splineL[khi])) * (h * h) / 6  );
-    return s3x;
 }
 
 void InitStruct(void){
@@ -340,3 +368,78 @@ void usart_println(char * str) {
     usart0_send('\r');
     usart0_send('\n');
 }
+
+//Функция записи команды в LCD
+void lcd_com(unsigned char p)                   // 'p' байт команды
+{
+    LCD_PORT &= ~(1 << RS);                     // RS = 0 (запись команд)
+    LCD_PORT |= (1 << EN);                      // EN = 1 (начало записи команды в LCD)
+    LCD_PORT &= 0x0F; LCD_PORT |= (p & 0xF0);   // старший ниббл
+    _delay_ms(1);
+    LCD_PORT &= ~(1 << EN);                     // EN = 0 (конец записи команды в LCD)
+    _delay_ms(1);
+    LCD_PORT |= (1 << EN);                      // EN = 1 (начало записи команды в LCD)
+    LCD_PORT &= 0x0F; LCD_PORT |= (p << 4);     // младший ниббл
+    _delay_ms(1);
+    LCD_PORT &= ~(1 << EN);                     // EN = 0 (конец записи команды в LCD)
+    _delay_ms(1);
+}
+
+
+//Функция записи данных в LCD
+void lcd_dat(unsigned char p)                   // 'p' байт данных
+{
+    LCD_PORT |= (1 << RS)|(1 << EN);            // RS = 1 (запись данных), EN - 1 (начало записи команды в LCD)
+    LCD_PORT &= 0x0F; LCD_PORT |= (p & 0xF0);   // старший ниббл
+    _delay_us(50);
+    LCD_PORT &= ~(1 << EN);                     // EN = 0 (конец записи команды в LCD)
+    _delay_us(50);
+    LCD_PORT |= (1 << EN);                      // EN = 1 (начало записи команды в LCD)
+    LCD_PORT &= 0x0F; LCD_PORT |= (p << 4);     // младший ниббл
+    _delay_us(50);
+    LCD_PORT &= ~(1 << EN);                     // EN = 0 (конец записи команды в LCD)
+    _delay_us(50);
+}
+
+//Функция очистки дисплея
+void lcd_clear(void)
+{
+    lcd_com(0x01);
+    _delay_ms(1);
+}
+
+//Функция инициализации LCD
+void lcd_init(void)
+{
+    lcd_com(0x33);   //режим 8 бит, мигающий курсор
+    _delay_ms(10);
+    lcd_com(0x32);   //режим 4 бит, мигающий курсор
+    _delay_ms(5);
+    lcd_com(0x28);   // шина 4 бит, LCD - 2 строки
+    _delay_ms(5);
+    lcd_com(0x08);   // полное выключение дисплея
+    _delay_ms(5);
+    lcd_clear();
+    lcd_com(0x06);   // сдвиг курсора вправо
+    lcd_com(0x0C);   // включение дисплея
+}
+
+//Функция перевода курсора на строку line и позицию pos
+void go_to(char pos, char line)
+{
+    char addr = 0x40 * line + pos;
+    addr |= 0x80;
+    lcd_com(addr);
+}
+
+//Функция вывода строки на LCD, начиная с координат X и Y
+void lcd_array( char x, char y, const char *str)
+{
+    go_to(x,y);
+    int i = 0;
+    while( str[i] != '\0' ) {          // цикл пока не конец строки
+        lcd_dat(str[i]);
+        i++;
+    };
+}
+
