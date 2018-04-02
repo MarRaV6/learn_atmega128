@@ -67,7 +67,7 @@ uint16_t read_adc(uint8_t adc_input);
 void adc_init(uint8_t);
 
 void InitStruct(void);
-uint16_t S3x(double datADC1);
+double S3x(double datADC1);
 void spline_progonka(void);
 
 void usart0_init(uint16_t baud);
@@ -82,7 +82,8 @@ typedef struct DependResist{
 
 enum Screen {
     screenTemp = 0,
-    screenPWM = 1
+    screenPWM = 1,
+    screenDebug = 2
 };
 
 void clear_line(char* str, int size) {
@@ -126,8 +127,7 @@ void Timer_Init()
     OCR1CL=0x00;
 
     // Timer(s)/Counter(s) Interrupt(s) initialization
-    //добавил к TIMSK = (1<<TOIE1) для включения прерываний
-    TIMSK=(0<<OCIE2) | (0<<TOIE2) | (0<<TICIE1) | (0<<OCIE1A) | (0<<OCIE1B) | (1<<TOIE1) | (0<<OCIE0) | (0<<TOIE0);
+    TIMSK=(0<<OCIE2) | (0<<TOIE2) | (0<<TICIE1) | (0<<OCIE1A) | (0<<OCIE1B) | (0<<TOIE1) | (0<<OCIE0) | (0<<TOIE0);
     ETIMSK=(0<<TICIE3) | (0<<OCIE3A) | (0<<OCIE3B) | (0<<TOIE3) | (0<<OCIE3C) | (0<<OCIE1C);
 };
 
@@ -208,13 +208,13 @@ int main(void) {
     char lower_line[SCR_LEN];        //Массив для нижней строки LCD дисплея
 
     uint16_t tempADC;
-    int16_t temp;               // реальная температура
+    double temp;               // реальная температура
     int16_t target = 30;        // целевая температура
     int16_t pwm_load = 0;       // мера скважности
 
     // PID
-    int16_t epsOld = 0, eps = 0;
-    float U = 0, P = 0, I = 0, D = 0;
+    double epsOld = 0, eps = 0;
+    double U = 0, P = 0, I = 0, D = 0;
 
     enum Screen screen = screenTemp;  // текущий экран
 
@@ -228,7 +228,7 @@ int main(void) {
             // переделать под флаги???  
             // переключение экранов
             if (PINA & (1<<1)) {  // A1
-                if (screen < screenPWM) {
+                if (screen < screenDebug) {
                     screen++;
                 }
             } else if (PINA & (1<<0)) {  // A0
@@ -245,19 +245,6 @@ int main(void) {
             temp = S3x(tempADC);
         
             // usart_println("Hello!");
-
-            /* 
-            // переключение экранов
-            if (PINA & (1<<1)) {  // A1
-                if (screen < screenPWM) {
-                    screen++;
-                }
-            } else if (PINA & (1<<0)) {  // A0
-                if (screen > screenTemp) {
-                    screen--;
-                }
-            };
-            */
         
             clear_line(upper_line, SCR_LEN);
             clear_line(lower_line, SCR_LEN);
@@ -268,9 +255,9 @@ int main(void) {
                             target = (target + 1) < MAX_TARGET ? target + 1 : target;
                             } else if (PINA & (1<<3)) {
                             target = (target - 1) > 0 ? target - 1 : target;
-                        };
+                        };                        
                         
-                        snprintf(upper_line, SCR_LEN, "T: %i, ADC: %i", temp, tempADC);
+                        snprintf(upper_line, SCR_LEN, "T: %0.2f (%i)", temp, tempADC);
                         snprintf(lower_line, SCR_LEN, "TARG: %i", target);
                         
                         lcd_clear();
@@ -282,8 +269,14 @@ int main(void) {
                             pwm_load = (pwm_load - 1) > 0 ? pwm_load - 1 : pwm_load;
                         };
 
-                        snprintf(upper_line, SCR_LEN, "%i%% U:%i E:%i", pwm_load, (int)U, eps);
-                        snprintf(lower_line, SCR_LEN, "PID:%i,%i,%i", (int)P, (int)I, (int)D);
+                        snprintf(upper_line, SCR_LEN, "%i%% E:%0.2f", pwm_load, eps);
+                        snprintf(lower_line, SCR_LEN, "%i,%i,%0.1f", (int)P, (int)I, D);
+                        
+                        lcd_clear();
+                    } break;
+                    case screenDebug: {
+                        snprintf(upper_line, SCR_LEN, "lt: %i", timerLocal);
+                        snprintf(lower_line, SCR_LEN, "gt: %i", timerGlobal);
                         
                         lcd_clear();
                     }
@@ -295,7 +288,7 @@ int main(void) {
             eps = target - temp;
             P = Kp * eps;
             I = I + Ki * eps;  // в методичке ошибка - интеграл это сумма
-            D = Kd * (epsOld - eps);
+            D = Kd * (eps - epsOld);
             
             if (fabs(I) > MAX_I) {
                 I = MAX_I * ((I > 0) ? 1 : -1);
@@ -314,7 +307,7 @@ int main(void) {
             
             PWM_OCR = (uint16_t)(pwm_load * 10.23);  // изменим широту импулься PWM
             
-            _delay_ms(10);  // убрать
+            _delay_ms(100);  // убрать
         
             //kalman_filter()           
         //}        
@@ -373,7 +366,7 @@ void Spline_progonka(void){
     }
 }
 
-uint16_t S3x(double datADC1){
+double S3x(double datADC1){
     Spline_progonka();
 
     int klo = 1;
@@ -394,7 +387,7 @@ uint16_t S3x(double datADC1){
     float a = (dependResist[khi].code - datADC1) / h;
     float b = (datADC1 - dependResist[klo].code) / h;
 
-    return (int16_t) ( a * dependResist[klo].temp + b * dependResist[khi].temp +
+    return ( a * dependResist[klo].temp + b * dependResist[khi].temp +
                 ((( pow(a,3) - a) * splineL[klo] + (pow(b,3) - b) * splineL[khi])) * (h * h) / 6  );
 }
 
