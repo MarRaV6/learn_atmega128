@@ -32,7 +32,7 @@ uint16_t timerLocal = 0;    // время в милисекундах
 // Коэффициенты PID
 #define Kp  1.5
 #define Ki  0.25
-#define Kd  0.1
+#define Kd  5
 #define MAX_I 150
 
 // АЦП
