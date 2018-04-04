@@ -40,6 +40,10 @@
 #define MAX_PWM_PRC 75
 #define MIN_PWM_PRC 0
 
+// Serial
+#define BOUDRATE 9600
+#define SERIAL_BUFF_SIZE 50
+
 // Максимальная температура уставки
 #define MAX_TARGET 120
 #define SCR_LEN 17
@@ -190,7 +194,7 @@ int main(void) {
     cli();
     preparations();
     Timer_Init();
-    // usart0_init(9600);
+    usart0_init(9600);
     sei();  // глобально разрешим прерывания
 
     InitStruct();
@@ -226,11 +230,12 @@ int main(void) {
             };
 
             tempADC = 1023 - read_adc(ADC_PIN);
-
             // temp = 0.0000000268 * pow(tempADC, 4) - 0.00004827 * pow(tempADC, 3) + 0.031424 * pow(tempADC, 2) - 8.404671 * tempADC + 801.582; //полином для преобразования температуры
             temp = S3x(tempADC);
-        
-            // usart_println("Hello!");
+            
+            char serial_buff[SERIAL_BUFF_SIZE];
+            snprintf(serial_buff, SERIAL_BUFF_SIZE, "%i;%i;%0.2f", (int)timeMillis, target, temp);
+            usart_println(serial_buff);
         
             clear_line(upper_line, SCR_LEN);
             clear_line(lower_line, SCR_LEN);
