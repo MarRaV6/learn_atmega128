@@ -18,22 +18,13 @@
 #define true 1
 #define false 0
 
-//определяем кол-во тиков для 1мс
-#define TCNT1_1MS (65536 - (F_CPU / (1024*1000)))
-
 //время для работы в секундах
-//#define timeWorkCmp (2 * 1000) 
-#define timeWorkCmp 2 
-
-uint16_t timeWork = 0;      // время работы программы
-uint16_t timerGlobal = 0;   // время в секундах
-uint16_t timerLocal = 0;    // время в милисекундах
 
 // Коэффициенты PID
 #define Kp  1.5
 #define Ki  0.25
-#define Kd  5
-#define MAX_I 150
+#define Kd  0 // 5
+#define MAX_I 50
 
 // АЦП
 // Voltage Reference: AVCC pin
@@ -46,6 +37,8 @@ uint16_t timerLocal = 0;    // время в милисекундах
 // ШИМ
 #define TIMER_TOP 0x3FF
 #define PWM_OCR OCR1A
+#define MAX_PWM_PRC 75
+#define MIN_PWM_PRC 0
 
 // Максимальная температура уставки
 #define MAX_TARGET 120
@@ -62,6 +55,7 @@ void lcd_clear(void);
 void lcd_init(void);
 void go_to(char pos, char line);
 void lcd_array( char x, char y, const char *str);
+void clear_line(char* str, int size);
 
 uint16_t read_adc(uint8_t adc_input);
 void adc_init(uint8_t);
@@ -86,9 +80,8 @@ enum Screen {
     screenDebug = 2
 };
 
-void clear_line(char* str, int size) {
-    memset(str, ' ', size);
-}
+uint64_t timeSeconds = 0;   // время в секундах
+uint64_t timeMillis = 0;    // время в милисекундах
 
 // kalman_t k;
 
@@ -125,50 +118,49 @@ void Timer_Init()
     OCR1BL=0x00;
     OCR1CH=0x00;
     OCR1CL=0x00;
-
+    
+    
+    // Timer/Counter 3 initialization
+    // Clock source: System Clock
+    // Clock value: 10000,000 kHz
+    // Mode: CTC top=OCR3A
+    // OC3A output: Disconnected
+    // OC3B output: Disconnected
+    // OC3C output: Disconnected
+    // Noise Canceler: Off
+    // Input Capture on Falling Edge
+    // Timer Period: 0,9989 ms
+    // Timer3 Overflow Interrupt: Off
+    // Input Capture Interrupt: Off
+    // Compare A Match Interrupt: On
+    // Compare B Match Interrupt: Off
+    // Compare C Match Interrupt: Off
+    TCCR3A=(0<<COM3A1) | (0<<COM3A0) | (0<<COM3B1) | (0<<COM3B0) | (0<<COM3C1) | (0<<COM3C0) | (0<<WGM31) | (0<<WGM30);
+    TCCR3B=(0<<ICNC3) | (0<<ICES3) | (0<<WGM33) | (1<<WGM32) | (0<<CS32) | (0<<CS31) | (1<<CS30);
+    TCNT3H=0x00;
+    TCNT3L=0x00;
+    ICR3H=0x00;
+    ICR3L=0x00;
+    OCR3AH=0x27;
+    OCR3AL=0x04;
+    OCR3BH=0x00;
+    OCR3BL=0x00;
+    OCR3CH=0x00;
+    OCR3CL=0x00;
+    
     // Timer(s)/Counter(s) Interrupt(s) initialization
     TIMSK=(0<<OCIE2) | (0<<TOIE2) | (0<<TICIE1) | (0<<OCIE1A) | (0<<OCIE1B) | (0<<TOIE1) | (0<<OCIE0) | (0<<TOIE0);
-    ETIMSK=(0<<TICIE3) | (0<<OCIE3A) | (0<<OCIE3B) | (0<<TOIE3) | (0<<OCIE3C) | (0<<OCIE1C);
-};
-
-void Timer3_Init(void){  
-     //TCCR1B = (1<<CS12) | (0<<CS11) | (1<<CS10);;
-     //TCNT1 = TCNT3_1MS;
-     // Enable timer 1 overflow interrupt.
-     //TIMSK = (1<<TOIE1);
-         
+    ETIMSK=(0<<TICIE3) | (1<<OCIE3A) | (0<<OCIE3B) | (0<<TOIE3) | (0<<OCIE3C) | (0<<OCIE1C);
 }
 
-static uint16_t timeCnt = 100;
-// прерывание по 1 таймеру 
-/*
-ISR(TIMER1_OVF_vect){
-    TIMSK = (0<<TOIE1); // отключаем прерывание
-    //TCNT1 = TCNT1_1MS;
-}
-*/
-
-void timerComp1ms(void){    
-    //timerLocal++;
-    if (TIMSK & (1<<TOIE1)) // проверяем включено ли прерывание 
-     return;
-    // если прерывание выключено, то включаем его       
-    TCNT1 = TCNT1_1MS;
-    TIMSK = (1<<TOIE1); // ставим значение счетчика для 1 мс
-
-    timerLocal++; // считаем мс для нашей программы
-
-    // timeCnt = (timeCnt < 1000) ? timeCnt++ : 0;
+// прерывание по 3 таймеру 
+ISR(TIMER3_COMPA_vect) {    
+    timeMillis++;  // считаем мс для нашей программы
     
-    if (timeCnt < 1000){ // если  счетчик времени не стал равной 1 мс, то крутим локальный счетчик
-     timeCnt++;
-     return;
+    // если  счетчик времени не стал равной 1 мс, то крутим локальный счетчик
+    if (timeMillis % 1000 == 0) {
+        timeSeconds++;  // увеличиваем счетчик времени для секунд 
     }
-
-    timeCnt = 0;
-    // увеличиваем счетчик времени для секунд
-    timerGlobal++; 
-    timeWork++;
 }
 
 void preparations(void){
@@ -198,7 +190,6 @@ int main(void) {
     cli();
     preparations();
     Timer_Init();
-    //Timer3_Init(); // инициализация таймера 3
     // usart0_init(9600);
     sei();  // глобально разрешим прерывания
 
@@ -217,28 +208,23 @@ int main(void) {
     double U = 0, P = 0, I = 0, D = 0;
 
     enum Screen screen = screenTemp;  // текущий экран
+    
+    uint64_t lastDisplayTime = 0;
 
-    while (1) {
-        
-        //timerComp1ms();
-        
-        // проверяем и меняем флаги по нажатию, 
-        // пока время работы не достигло желаемого результата 
-        //if ( timeWork <= timeWorkCmp) {
-            // переделать под флаги???  
-            // переключение экранов
+    while (1) {        
+        if ((timeMillis - lastDisplayTime) >= 100) {
+            lastDisplayTime = timeMillis;
+
             if (PINA & (1<<1)) {  // A1
-                if (screen < screenDebug) {
-                    screen++;
-                }
+               if (screen < screenDebug) {
+                   screen++;
+               }                
             } else if (PINA & (1<<0)) {  // A0
-                if (screen > screenTemp) {
-                    screen--;
-                }
-            }       
-        //} else { // когда достигаем желаемого результата по времени делаем обычные дела
-            //timeWork = 0;
-            
+               if (screen > screenTemp) {
+                   screen--;
+               }
+            };
+
             tempADC = 1023 - read_adc(ADC_PIN);
 
             // temp = 0.0000000268 * pow(tempADC, 4) - 0.00004827 * pow(tempADC, 3) + 0.031424 * pow(tempADC, 2) - 8.404671 * tempADC + 801.582; //полином для преобразования температуры
@@ -249,68 +235,53 @@ int main(void) {
             clear_line(upper_line, SCR_LEN);
             clear_line(lower_line, SCR_LEN);
 
-                switch (screen) {
-                    case screenTemp: {
-                        if (PINA & (1<<2)) {
-                            target = (target + 1) < MAX_TARGET ? target + 1 : target;
-                            } else if (PINA & (1<<3)) {
-                            target = (target - 1) > 0 ? target - 1 : target;
-                        };                        
+            switch (screen) {
+                case screenTemp: {
+                    if (PINA & (1<<2)) {
+                        target = (target + 1) < MAX_TARGET ? target + 1 : target;
+                        } else if (PINA & (1<<3)) {
+                        target = (target - 1) > 0 ? target - 1 : target;
+                    };                        
                         
-                        snprintf(upper_line, SCR_LEN, "T: %0.2f (%i)", temp, tempADC);
-                        snprintf(lower_line, SCR_LEN, "TARG: %i", target);
+                    snprintf(upper_line, SCR_LEN, "T: %0.2f (%i)", temp, tempADC);
+                    snprintf(lower_line, SCR_LEN, "TARG: %i", target);
                         
-                        lcd_clear();
-                    } break;
-                    case screenPWM: {
-                        if (PINA & (1<<2)) {
-                            pwm_load = (pwm_load + 1) < 100 ? pwm_load + 1 : pwm_load;
-                            } else if (PINA & (1<<3)) {
-                            pwm_load = (pwm_load - 1) > 0 ? pwm_load - 1 : pwm_load;
-                        };
-
-                        snprintf(upper_line, SCR_LEN, "%i%% E:%0.2f", pwm_load, eps);
-                        snprintf(lower_line, SCR_LEN, "%i,%i,%0.1f", (int)P, (int)I, D);
+                    lcd_clear();
+                } break;
+                case screenPWM: {
+                    snprintf(upper_line, SCR_LEN, "%i%% E:%0.2f", pwm_load, eps);
+                    snprintf(lower_line, SCR_LEN, "%i,%i,%0.1f", (int)P, (int)I, D);
                         
-                        lcd_clear();
-                    } break;
-                    case screenDebug: {
-                        snprintf(upper_line, SCR_LEN, "lt: %i", timerLocal);
-                        snprintf(lower_line, SCR_LEN, "gt: %i", timerGlobal);
-                        
-                        lcd_clear();
-                    }
+                    lcd_clear();
+                } break;
+                case screenDebug: {
+                    snprintf(upper_line, SCR_LEN, "sec: %i", (int)timeSeconds);
+                    lcd_clear();
                 }
+            }            
         
             lcd_array(1,0, upper_line);
             lcd_array(1,1, lower_line);
                 
             eps = target - temp;
             P = Kp * eps;
-            I = I + Ki * eps;  // в методичке ошибка - интеграл это сумма
+            I += Ki * eps;
             D = Kd * (eps - epsOld);
+            U = P + I + D;          
+            epsOld = eps;
             
             if (fabs(I) > MAX_I) {
                 I = MAX_I * ((I > 0) ? 1 : -1);
             }
+            pwm_load = (int) U;
+            pwm_load = (pwm_load > MAX_PWM_PRC) ? MAX_PWM_PRC : (pwm_load < MIN_PWM_PRC) ? MIN_PWM_PRC : pwm_load;
             
-            U = P + I + D;
-            epsOld = eps;
+            if (eps < 0) pwm_load = MIN_PWM_PRC;   // в случае превышения сразу выключим обогревание
 
-            pwm_load = (int) U;  // вот тут округления с float до int
-
-            if (pwm_load > 75) pwm_load = 75;   // ограничим ШИМ сверху
-            if (pwm_load < 0) pwm_load = 0;     // и снизу
-            
-            if (eps < 0) pwm_load = 0;          // в случае превышения сразу выключим обогревание
-
-            
             PWM_OCR = (uint16_t)(pwm_load * 10.23);  // изменим широту импулься PWM
-            
-            _delay_ms(100);  // убрать
         
             //kalman_filter()           
-        //}        
+        }
     }
 }
 
@@ -435,6 +406,10 @@ void usart_println(char * str) {
     usart_print(str);
     usart0_send('\r');
     usart0_send('\n');
+}
+
+void clear_line(char* str, int size) {
+    memset(str, ' ', size);
 }
 
 //Функция записи команды в LCD
