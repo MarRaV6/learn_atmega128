@@ -215,7 +215,8 @@ int main(void) {
     
     uint64_t lastDisplayTime = 0;
 
-    while (1) {        
+    while (1) {
+
         if ((timeMillis - lastDisplayTime) >= 100) {
             lastDisplayTime = timeMillis;
 
@@ -234,7 +235,7 @@ int main(void) {
             temp = S3x(tempADC);
             
             char serial_buff[SERIAL_BUFF_SIZE];
-            snprintf(serial_buff, SERIAL_BUFF_SIZE, "%i;%i;%0.2f", (int)timeMillis, target, temp);
+            snprintf(serial_buff, SERIAL_BUFF_SIZE, "%li;%i;%0.2f", (long int)timeMillis, target, temp);
             usart_println(serial_buff);
         
             clear_line(upper_line, SCR_LEN);
