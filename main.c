@@ -31,9 +31,6 @@
 #define ADC_VREF_TYPE ((0<<REFS1) | (1<<REFS0) | (0<<ADLAR))
 #define ADC_PIN 3
 
-// Размер таблицы для сплайна
-#define TABLE_LEN 11
-
 // ШИМ
 #define TIMER_TOP 0x3FF
 #define PWM_OCR OCR1A
@@ -64,19 +61,10 @@ void clear_line(char* str, int size);
 uint16_t read_adc(uint8_t adc_input);
 void adc_init(uint8_t);
 
-void InitStruct(void);
-double S3x(double datADC1);
-void spline_progonka(void);
-
 void usart0_init(uint16_t baud);
 void usart0_send(uint8_t data);
 void usart_print(char * str);
 void usart_println(char * str);
-
-typedef struct DependResist{
-    int  code; // значение кода ацп
-    int  temp; // соотвествующее значение температуры для кода
-} DependResist;
 
 enum Screen {
     screenTemp = 0,
@@ -197,8 +185,6 @@ int main(void) {
     usart0_init(9600);
     sei();  // глобально разрешим прерывания
 
-    InitStruct();
-
     char upper_line[SCR_LEN];        //Массив для верхней строки LCD дисплея
     char lower_line[SCR_LEN];        //Массив для нижней строки LCD дисплея
 
@@ -231,8 +217,8 @@ int main(void) {
             };
 
             tempADC = 1023 - read_adc(ADC_PIN);
-            // temp = 0.0000000268 * pow(tempADC, 4) - 0.00004827 * pow(tempADC, 3) + 0.031424 * pow(tempADC, 2) - 8.404671 * tempADC + 801.582; //полином для преобразования температуры
-            temp = S3x(tempADC);
+
+            temp = -0.0000002890253 * pow(tempADC, 4) + 0.0004360764 * pow(tempADC, 3) - 0.2463599 * pow(tempADC, 2) + 62.25780 * tempADC - 5923.901;
             
             char serial_buff[SERIAL_BUFF_SIZE];
             snprintf(serial_buff, SERIAL_BUFF_SIZE, "%li;%i;%0.2f", (long int)timeMillis, target, temp);
@@ -317,65 +303,6 @@ void adc_init(uint8_t PIN) {
     // предделитель АЦП 128
 }
 
-//--------------------------------------------------------------------
-//
-
-DependResist dependResist[(TABLE_LEN+1)]; // создаем калибровочную таблицу на max_n
-float splineL[TABLE_LEN];
-
-void Spline_progonka(void){
-    float mu[TABLE_LEN];
-
-    splineL[1] = 0;
-    mu[1] = 0;
-
-    for (uint8_t i = 2; i < TABLE_LEN; i++){
-        float sig = (dependResist[i].code - dependResist[i-1].code ) / (dependResist[i+1].code - dependResist[i-1].code);
-        float p = sig * splineL[i-1]+2;
-        splineL[i] = (sig - 1) / p;
-        mu[i] = (dependResist[i+1].temp - dependResist[i].temp) / (dependResist[i+1].code - dependResist[i].code) -
-                (dependResist[i].temp - dependResist[i-1].temp) / (dependResist[i].code - dependResist[i-1].code);
-        mu[i] = (6* mu[i] / ( dependResist[i+1].code - dependResist[i-1].code) - sig * mu[i-1]) / p;
-    }
-    splineL[TABLE_LEN] = 0;
-    for (int i = TABLE_LEN-1; i > 0; i--){
-        splineL[i] = splineL[i] * splineL[i+1] + mu[i];
-    }
-}
-
-double S3x(double datADC1){
-    Spline_progonka();
-
-    int klo = 1;
-    int khi = TABLE_LEN;
-    int k = TABLE_LEN;
-
-    while (k>1){
-        k = khi - klo;
-        if (dependResist[k].code > datADC1){
-            khi = k;
-        } else {
-            klo = k;
-        }
-        k = khi - klo;
-    }
-
-    int h = dependResist[khi].code - dependResist[klo].code;
-    float a = (dependResist[khi].code - datADC1) / h;
-    float b = (datADC1 - dependResist[klo].code) / h;
-
-    return ( a * dependResist[klo].temp + b * dependResist[khi].temp +
-                ((( pow(a,3) - a) * splineL[klo] + (pow(b,3) - b) * splineL[khi])) * (h * h) / 6  );
-}
-
-void InitStruct(void){
-    int tempCode[TABLE_LEN] = {300, 303, 322, 330, 337, 357, 370, 386, 395, 409, 424};
-    int tempT[TABLE_LEN]    = { 28,  30,  35,  40,  42,  50,  55,  60,  65,  70,  75};
-    for (uint8_t index = 1; index <= TABLE_LEN; index++){
-        dependResist[index].code = tempCode[index];
-        dependResist[index].temp = tempT[index];
-    }
-}
 
 //--------------------------------------------------------------------
 // Функции usart
