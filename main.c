@@ -34,7 +34,7 @@
 // ШИМ
 #define TIMER_TOP 0x3FF
 #define PWM_OCR OCR1A
-#define MAX_PWM_PRC 75
+#define MAX_PWM_PRC 50
 #define MIN_PWM_PRC 0
 
 // Serial
@@ -182,7 +182,7 @@ int main(void) {
     cli();
     preparations();
     Timer_Init();
-    usart0_init(9600);
+    usart0_init(BOUDRATE);
     sei();  // глобально разрешим прерывания
 
     char upper_line[SCR_LEN];        //Массив для верхней строки LCD дисплея
