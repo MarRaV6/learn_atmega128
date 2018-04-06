@@ -52,7 +52,18 @@
 #define EN       PC3
 #define LCD_PORT PORTC
 
+typedef struct {
+    double eps;
+    double old_eps;
+    double P;
+    double I;
+    double D;
+    double U;
+} pid_t;
+
 void key_pressed_out(void);
+void send_serial_data(int target, float temp, float filtered_temp);
+int compute_pwm(pid_t *pid);
 
 void lcd_com(unsigned char p);
 void lcd_dat(unsigned char p);
@@ -76,20 +87,22 @@ enum Screen {
     screenDebug = 2
 } screen; // вывел в глобальную переменную
 
+pid_t PID;
+
 // переменные для времени
 uint64_t timeSeconds = 0;   // время в секундах
 uint64_t timeMillis = 0;    // время в милисекундах
 
 // переменные для кнопок
-uint8_t flagPortA0A1 = 0; //флаг порта А
+uint8_t flagsPortA = 0; //флаг порта А
 uint8_t lastResultBtn = 0; // предыдущее состояние кнопки
 
-// kalman_t k;
+kalman_t filtered_k;
 int16_t target = 30;        // целевая температура
 
 //------------------------------------------------------------------------------------------------------------------
 
-void Timer_Init()
+void timers_init()
 {
     // Timer/Counter 1 initialization
     // Clock source: System Clock
@@ -167,28 +180,43 @@ ISR(TIMER3_COMPA_vect) {
     // для увеличения уставки
     if (timeMillis % 100 == 0) {
         if (screen == screenTemp) {
-            if (flagPortA0A1 & (1<<2)) {
+            if (flagsPortA & (1<<2)) {
                 target = (target + 1) < MAX_TARGET ? target + 1 : target;
-                flagPortA0A1 &= (0<<2); // убиваем бит?
-            } else if (flagPortA0A1 & (1<<3)) {
+                flagsPortA &= (0<<2); // убиваем бит?
+            } else if (flagsPortA & (1<<3)) {
                 target = (target - 1) > 0 ? target - 1 : target;
-                flagPortA0A1 &= (0<<3); // убиваем бит?
+                flagsPortA &= (0<<3); // убиваем бит?
             };
         }
 
         //переделал под флаги
-        if (flagPortA0A1 & (1<<1)) {  // A1
+        if (flagsPortA & (1<<1)) {  // A1
             if (screen < screenDebug) {
                 screen++;
             }
-            flagPortA0A1 &= (0<<1); // убиваем бит?
-        } else if (flagPortA0A1 & (1<<0)) {  // A0
+            flagsPortA &= (0<<1); // убиваем бит?
+        } else if (flagsPortA & (1<<0)) {  // A0
             if (screen > screenTemp) {
                 screen--;
             }
-            flagPortA0A1 &= (0<<0); // убиваем бит?
+            flagsPortA &= (0<<0); // убиваем бит?
         };
     }
+}
+
+void kalman_init(kalman_t *k) {
+     k->varVolt = 0.5;
+     k->varProcess = 0.001;
+     k->P = 1.0;
+}
+
+void pid_init(pid_t *pid) {
+    pid->P = 0;
+    pid->I = 0;
+    pid->D = 0;
+    pid->U = 0;
+    pid->eps = 0;
+    pid->old_eps = 0;
 }
 
 void preparations(void){
@@ -202,13 +230,11 @@ void preparations(void){
     
     DDRC = 0xFF;    //Порт C - выход (подключен LCD дисплей)
     PORTC = 0x00;
+    
+    DDRD = 0xFF;  // usart
+    PORTD = 0x00;
 
     lcd_init(); //Инициализация дисплея
-    
-    // не используем
-    DDRD = 0xFF;
-    PORTD = 0x00;
-    
     adc_init(ADC_PIN); // подключим АЦП к выводу PF3
 }
 
@@ -217,9 +243,12 @@ int main(void) {
     // глобально запретим прерывания
     cli();
     preparations();
-    Timer_Init();
+    timers_init();
     usart0_init(BOUDRATE);
     sei();  // глобально разрешим прерывания
+    
+    kalman_init(&filtered_k);
+    pid_init(&PID);
 
     char upper_line[SCR_LEN];        //Массив для верхней строки LCD дисплея
     char lower_line[SCR_LEN];        //Массив для нижней строки LCD дисплея
@@ -229,30 +258,25 @@ int main(void) {
     target = 30;        // целевая температура
     int16_t pwm_load = 0;       // мера скважности
 
-    // PID
-    double epsOld = 0, eps = 0;
-    double U = 0, P = 0, I = 0, D = 0;
-
     screen = screenTemp;
     uint64_t lastDisplayTime = 0;
 
     while (1) {
         //функция для обработки кнопок
-        key_pressed_out(); // функция обработки переключения экранов
+        key_pressed_out();
 
         if ((timeMillis - lastDisplayTime) >= 100) {
             lastDisplayTime = timeMillis;
 
             tempADC = 1023 - read_adc(ADC_PIN);
             temp = -0.0000002890253 * pow(tempADC, 4) + 0.0004360764 * pow(tempADC, 3) - 0.2463599 * pow(tempADC, 2) + 62.25780 * tempADC - 5923.901;
+            
+            float ftemp = kalman_filter(&filtered_k, temp);  // отфильтруем
 
-            char serial_buff[SERIAL_BUFF_SIZE];
-            snprintf(serial_buff, SERIAL_BUFF_SIZE, "%li;%i;%0.2f", (long int)timeMillis, target, temp);
-            usart_println(serial_buff);
+            send_serial_data(target, temp, ftemp);  // отправим данные в порт
         
             clear_line(upper_line, SCR_LEN);
             clear_line(lower_line, SCR_LEN);
-
             switch (screen) {
                 case screenTemp: {                        
                     snprintf(upper_line, SCR_LEN, "T: %0.2f (%i)", temp, tempADC);
@@ -260,41 +284,31 @@ int main(void) {
 
                 } break;
                 case screenPWM: {
-                    snprintf(upper_line, SCR_LEN, "%i%% E:%0.2f", pwm_load, eps);
-                    snprintf(lower_line, SCR_LEN, "%i,%i,%0.1f", (int)P, (int)I, D);
+                    snprintf(upper_line, SCR_LEN, "%i%% E:%0.2f", pwm_load, PID.eps);
+                    snprintf(lower_line, SCR_LEN, "%i,%i,%0.1f", (int)PID.P, (int)PID.I, PID.D);
 
                 } break;
                 case screenDebug: {
-                    snprintf(upper_line, SCR_LEN, "sec: %i", (int)timeSeconds);
+                    snprintf(upper_line, SCR_LEN, "t:%0.2f, f:%0.2f", temp, ftemp);
                     // snprintf(upper_line, SCR_LEN, "%i", (int)PINA);
-                    snprintf(lower_line, SCR_LEN, "fpa:%i", (int)flagPortA0A1);
+                    // snprintf(lower_line, SCR_LEN, "fpa:%i", (int)flagPortA0A1);
                 }
             }
             lcd_clear();
             lcd_array(1,0, upper_line);
             lcd_array(1,1, lower_line);
-                
-            eps = target - temp;
-            P = Kp * eps;
-            I += Ki * eps;
-            D = Kd * (eps - epsOld);
-            U = P + I + D;          
-            epsOld = eps;
             
-            if (fabs(I) > MAX_I) {
-                I = MAX_I * ((I > 0) ? 1 : -1);
-            }
-            pwm_load = (int) U;
-            pwm_load = (pwm_load > MAX_PWM_PRC) ? MAX_PWM_PRC : (pwm_load < MIN_PWM_PRC) ? MIN_PWM_PRC : pwm_load;
-            if (eps < 0) pwm_load = MIN_PWM_PRC;   // в случае превышения сразу выключим обогревание
+            temp = ftemp;  // присвоим тут, а не сразу из-за вывода для дебага
+            
+            PID.eps = (double)(target - temp);
+            pwm_load = compute_pwm(&PID);
             PWM_OCR = (uint16_t)(pwm_load * 10.23);  // изменим широту импулься PWM
-            //kalman_filter()
         }
     }
 }
 
-//действие по нажатию кнопок PA0 & PA1
-void key_pressed_out(void){ // параметры: кнопки
+//действие по нажатию кнопок PA0 - PA3
+void key_pressed_out(void){
   uint8_t resultBtn = 0;
   uint8_t readCount = 0;
   
@@ -317,7 +331,7 @@ void key_pressed_out(void){ // параметры: кнопки
           //выделяем момент, когда отпускаем кнопку
           if (lastResultBtn && (!resultBtn)){
             // Взводим флаг нажатия кнопки
-            flagPortA0A1 = lastResultBtn;
+            flagsPortA = lastResultBtn;
             lastResultBtn = 0;
           }
     } break;
@@ -326,11 +340,41 @@ void key_pressed_out(void){ // параметры: кнопки
         //выделяем момент фронта кнопки
             if (resultBtn && (resultBtn == lastResultBtn)){
                 // Взводим флаг нажатия кнопки
-                flagPortA0A1 = resultBtn;
+                flagsPortA = resultBtn;
             }
     } break;
 
   }
+}
+
+void send_serial_data(int target, float temp, float filtered_temp) {
+     char serial_buff[SERIAL_BUFF_SIZE];
+     snprintf(serial_buff, SERIAL_BUFF_SIZE, "%li;%i;%0.2f;%0.2f", (long int)timeMillis, target, temp, filtered_temp);
+     usart_println(serial_buff);
+}
+
+// Расчет PID
+int compute_pwm(pid_t *pid) {
+    double eps = pid->eps;
+    
+    pid->P = Kp * eps;
+    pid->D = Kd * (eps - pid->old_eps);
+    pid->old_eps = eps;
+    
+    if ( (MIN_PWM_PRC < pid->U) && (pid->U < MAX_PWM_PRC) )
+        pid->I += Ki * eps;
+    
+    if (fabs(pid->I) > MAX_I)
+        pid->I = MAX_I * ((pid->I > 0) ? 1 : -1);
+    
+    pid->U = pid->P + pid->I + pid->D;
+    
+    int pwm_load = pid->U;
+    pwm_load = (pwm_load > MAX_PWM_PRC) ? MAX_PWM_PRC : (pwm_load < MIN_PWM_PRC) ? MIN_PWM_PRC : pwm_load;
+    
+    if (eps < 0) pwm_load = MIN_PWM_PRC;   // в случае превышения сразу выключим обогревание
+    
+    return pwm_load;
 }
 
 // Read the AD conversion result
