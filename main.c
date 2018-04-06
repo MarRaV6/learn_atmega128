@@ -75,6 +75,7 @@ enum Screen {
     screenPWM = 1,
     screenDebug = 2
 } screen; // вывел в глобальную переменную
+
 // переменные для времени
 uint64_t timeSeconds = 0;   // время в секундах
 uint64_t timeMillis = 0;    // время в милисекундах
@@ -125,7 +126,7 @@ void Timer_Init()
     // Clock source: System Clock
     // Clock value: 10000,000 kHz
     // Mode: CTC top=OCR3A
-    // OC3A output: Discon  nected
+    // OC3A output: Disconnected
     // OC3B output: Disconnected
     // OC3C output: Disconnected
     // Noise Canceler: Off
@@ -161,15 +162,32 @@ ISR(TIMER3_COMPA_vect) {
     // если  счетчик времени не стал равной 1 мс, то крутим локальный счетчик
     if (timeMillis % 1000 == 0) {
         timeSeconds++;  // увеличиваем счетчик времени для секунд 
-        if (screen == screenTemp) { // для увеличения уставки
-          if (flagPortA0A1 & (1<<2)) {
-            target = (target + 1) < MAX_TARGET ? target + 1 : target;
-            flagPortA0A1 &= (0<<2); // убиваем бит?
-          } else if (flagPortA0A1 & (1<<3)) {
-            target = (target - 1) > 0 ? target - 1 : target;
-            flagPortA0A1 &= (0<<3); // убиваем бит?
-          };
+    }
+    
+    // для увеличения уставки
+    if (timeMillis % 100 == 0) {
+        if (screen == screenTemp) {
+            if (flagPortA0A1 & (1<<2)) {
+                target = (target + 1) < MAX_TARGET ? target + 1 : target;
+                flagPortA0A1 &= (0<<2); // убиваем бит?
+            } else if (flagPortA0A1 & (1<<3)) {
+                target = (target - 1) > 0 ? target - 1 : target;
+                flagPortA0A1 &= (0<<3); // убиваем бит?
+            };
         }
+
+        //переделал под флаги
+        if (flagPortA0A1 & (1<<1)) {  // A1
+            if (screen < screenDebug) {
+                screen++;
+            }
+            flagPortA0A1 &= (0<<1); // убиваем бит?
+        } else if (flagPortA0A1 & (1<<0)) {  // A0
+            if (screen > screenTemp) {
+                screen--;
+            }
+            flagPortA0A1 &= (0<<0); // убиваем бит?
+        };
     }
 }
 
@@ -208,7 +226,6 @@ int main(void) {
 
     uint16_t tempADC;
     double temp;               // реальная температура
-    //int16_t target = 30;        // целевая температура
     target = 30;        // целевая температура
     int16_t pwm_load = 0;       // мера скважности
 
@@ -216,29 +233,15 @@ int main(void) {
     double epsOld = 0, eps = 0;
     double U = 0, P = 0, I = 0, D = 0;
 
-    // enum Screen screen = screenTemp;  // текущий экран
-    // enum Screen screen = screenTemp;  // влючаем режим дебага
-    screen = screenDebug;
+    screen = screenTemp;
     uint64_t lastDisplayTime = 0;
 
     while (1) {
         //функция для обработки кнопок
         key_pressed_out(); // функция обработки переключения экранов
-        //key_pressed(); // функция обработки значения уставки
+
         if ((timeMillis - lastDisplayTime) >= 100) {
             lastDisplayTime = timeMillis;
-            //переделал под флаги
-            if (flagPortA0A1 & (1<<1)) {  // A1
-               if (screen < screenDebug) {
-                   screen++;
-               }
-              flagPortA0A1 &= (0<<1); // убиваем бит?
-            } else if (flagPortA0A1 & (1<<0)) {  // A0
-               if (screen > screenTemp) {
-                   screen--;
-               }
-               flagPortA0A1 &= (0<<0); // убиваем бит?
-            };
 
             tempADC = 1023 - read_adc(ADC_PIN);
             temp = -0.0000002890253 * pow(tempADC, 4) + 0.0004360764 * pow(tempADC, 3) - 0.2463599 * pow(tempADC, 2) + 62.25780 * tempADC - 5923.901;
@@ -251,34 +254,23 @@ int main(void) {
             clear_line(lower_line, SCR_LEN);
 
             switch (screen) {
-                case screenTemp: {
-                  //переделал под флаги
-                    // if (flagPortA0A1 & (1<<2)) {
-                    //     target = (target + 1) < MAX_TARGET ? target + 1 : target;
-                    //     } else if (flagPortA0A1 & (1<<3)) {
-                    //     target = (target - 1) > 0 ? target - 1 : target;
-                    // };                        
-                        
+                case screenTemp: {                        
                     snprintf(upper_line, SCR_LEN, "T: %0.2f (%i)", temp, tempADC);
                     snprintf(lower_line, SCR_LEN, "TARG: %i", target);
-                        
-                    lcd_clear();
+
                 } break;
                 case screenPWM: {
                     snprintf(upper_line, SCR_LEN, "%i%% E:%0.2f", pwm_load, eps);
                     snprintf(lower_line, SCR_LEN, "%i,%i,%0.1f", (int)P, (int)I, D);
-                        
-                    lcd_clear();
+
                 } break;
                 case screenDebug: {
-                    // snprintf(upper_line, SCR_LEN, "sec: %i", (int)timeSeconds);
-                    snprintf(upper_line, SCR_LEN, "%i", (int)PINA);
+                    snprintf(upper_line, SCR_LEN, "sec: %i", (int)timeSeconds);
+                    // snprintf(upper_line, SCR_LEN, "%i", (int)PINA);
                     snprintf(lower_line, SCR_LEN, "fpa:%i", (int)flagPortA0A1);
-                    lcd_clear();
                 }
             }
-
-            
+            lcd_clear();
             lcd_array(1,0, upper_line);
             lcd_array(1,1, lower_line);
                 
@@ -303,12 +295,10 @@ int main(void) {
 
 //действие по нажатию кнопок PA0 & PA1
 void key_pressed_out(void){ // параметры: кнопки
-  // lastResultBtn = 0;
   uint8_t resultBtn = 0;
   uint8_t readCount = 0;
+  
   while(readCount < COUNT_DRB){
-    // uint8_t tempButton = PINA;
-    // tempButton &= 0b00001111;
     // используем маску для A0-A3
     uint8_t tempBtn = (PINA & 0b00001111);
 
@@ -316,7 +306,7 @@ void key_pressed_out(void){ // параметры: кнопки
       readCount++;
     } else {
       resultBtn = tempBtn;
-      lastResultBtn = (resultBtn>0)?tempBtn:lastResultBtn;
+      lastResultBtn = (resultBtn > 0) ? tempBtn : lastResultBtn;
       readCount = 0;
     }
   }
@@ -334,43 +324,14 @@ void key_pressed_out(void){ // параметры: кнопки
     case 4:
     case 8:{ // A2 & A3
         //выделяем момент фронта кнопки
-            if (resultBtn && (resultBtn != lastResultBtn)){
+            if (resultBtn && (resultBtn == lastResultBtn)){
                 // Взводим флаг нажатия кнопки
                 flagPortA0A1 = resultBtn;
             }
     } break;
 
   }
-
-  // //выделяем момент, когда отпускаем кнопку
-  // if (lastResultBtn && (!resultBtn)){
-  //   // Взводим флаг нажатия кнопки
-  //   flagPortA0A1 = lastResultBtn;
-  //   lastResultBtn = 0;
-  // }
 }
-
-//действие по нажатию кнопок PA2 & PA3
-// void key_pressed(void){
-//   // lastResultBtn = 0;
-//   resultBtn = 0;
-//   uint8_t readCount = 0;
-//   while(readCount < COUNT_DRB){
-//     uint8_t tempButton = PINA;
-//     tempButton &= 0b00001100; // маска для A2 && A3
-//     if(resultBtn == tempButton){
-//       readCount++;
-//     } else {
-//       resultBtn = tempButton;
-//       readCount = 0;
-//     }
-//   }
-//   //выделяем момент фронта кнопки
-//   if (resultBtn && (resultBtn != lastResultBtn)){
-//     // Взводим флаг нажатия кнопки
-//     flagPortA2A3 = resultBtn;
-//   }
-// }
 
 // Read the AD conversion result
 uint16_t read_adc(uint8_t adc_input){
