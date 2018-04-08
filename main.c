@@ -87,17 +87,20 @@ enum Screen {
     screenDebug = 2
 } screen; // вывел в глобальную переменную
 
-pid_t PID;
+// для фильтра Калмана
+kalman_t filtered_k = {.varVolt = 0.5, .varProcess = 0.001, .P = 1.0};
+    
+// Хранит состояние ПИД регулятора
+pid_t PID = {.P = 0, .I = 0, .D = 0, .U = 0, .eps = 0, .old_eps = 0};
 
 // переменные для времени
 uint64_t timeSeconds = 0;   // время в секундах
 uint64_t timeMillis = 0;    // время в милисекундах
 
 // переменные для кнопок
-uint8_t flagsPortA = 0; //флаг порта А
-uint8_t lastResultBtn = 0; // предыдущее состояние кнопки
+uint8_t flagsPortA = 0;     //флаг порта А
+uint8_t lastResultBtn = 0;  // предыдущее состояние кнопки
 
-kalman_t filtered_k;
 int16_t target = 30;        // целевая температура
 
 //------------------------------------------------------------------------------------------------------------------
@@ -204,20 +207,6 @@ ISR(TIMER3_COMPA_vect) {
     }
 }
 
-void kalman_init(kalman_t *k) {
-     k->varVolt = 0.5;
-     k->varProcess = 0.001;
-     k->P = 1.0;
-}
-
-void pid_init(pid_t *pid) {
-    pid->P = 0;
-    pid->I = 0;
-    pid->D = 0;
-    pid->U = 0;
-    pid->eps = 0;
-    pid->old_eps = 0;
-}
 
 void preparations(void){
     // кнопки
@@ -246,31 +235,27 @@ int main(void) {
     timers_init();
     usart0_init(BOUDRATE);
     sei();  // глобально разрешим прерывания
-    
-    kalman_init(&filtered_k);
-    pid_init(&PID);
 
     char upper_line[SCR_LEN];        //Массив для верхней строки LCD дисплея
     char lower_line[SCR_LEN];        //Массив для нижней строки LCD дисплея
 
     uint16_t tempADC;
     double temp;               // реальная температура
-    target = 30;        // целевая температура
     int16_t pwm_load = 0;       // мера скважности
 
     screen = screenTemp;
     uint64_t lastDisplayTime = 0;
 
     while (1) {
-        //функция для обработки кнопок
-        key_pressed_out();
+        key_pressed_out();   //функция для обработки кнопок
 
         if ((timeMillis - lastDisplayTime) >= 100) {
             lastDisplayTime = timeMillis;
 
-            tempADC = 1023 - read_adc(ADC_PIN);
-            temp = -0.0000002890253 * pow(tempADC, 4) + 0.0004360764 * pow(tempADC, 3) - 0.2463599 * pow(tempADC, 2) + 62.25780 * tempADC - 5923.901;
+            tempADC = 1023 - read_adc(ADC_PIN);  // считаем показания температуры с АЦП
             
+            // переведем в градусы Цельсия
+            temp = -0.0000002890253 * pow(tempADC, 4) + 0.0004360764 * pow(tempADC, 3) - 0.2463599 * pow(tempADC, 2) + 62.25780 * tempADC - 5923.901;
             float ftemp = kalman_filter(&filtered_k, temp);  // отфильтруем
 
             send_serial_data(target, temp, ftemp);  // отправим данные в порт
@@ -290,17 +275,14 @@ int main(void) {
                 } break;
                 case screenDebug: {
                     snprintf(upper_line, SCR_LEN, "t:%0.2f, f:%0.2f", temp, ftemp);
-                    // snprintf(upper_line, SCR_LEN, "%i", (int)PINA);
-                    // snprintf(lower_line, SCR_LEN, "fpa:%i", (int)flagPortA0A1);
+                    snprintf(lower_line, SCR_LEN, "sec: %li", (long int)timeSeconds);
                 }
             }
             lcd_clear();
             lcd_array(1,0, upper_line);
             lcd_array(1,1, lower_line);
             
-            temp = ftemp;  // присвоим тут, а не сразу из-за вывода для дебага
-            
-            PID.eps = (double)(target - temp);
+            PID.eps = (double)(target - ftemp);
             pwm_load = compute_pwm(&PID);
             PWM_OCR = (uint16_t)(pwm_load * 10.23);  // изменим широту импулься PWM
         }
