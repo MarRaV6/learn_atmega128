@@ -1,10 +1,3 @@
-/*
- * SampleWork.c
- *
- * Created: 20.03.2018 17:19:28
- * Author : x_dea
- */
-
 #define F_CPU 10000000UL
 #include <avr/io.h>
 #include <avr/interrupt.h>
@@ -14,11 +7,6 @@
 #include <string.h>
 
 #include "kalman.h"
-
-#define true 1
-#define false 0
-
-//время для работы в секундах
 
 // Коэффициенты PID
 #define Kp  1.5
@@ -274,8 +262,9 @@ int main(void) {
 
                 } break;
                 case screenDebug: {
+                    // char s[] = {__DATE__[9], __DATE__[10], '.' ,'\0'};
                     snprintf(upper_line, SCR_LEN, "t:%0.2f, f:%0.2f", temp, ftemp);
-                    snprintf(lower_line, SCR_LEN, "sec: %li", (long int)timeSeconds);
+                    snprintf(lower_line, SCR_LEN, "sec:%li", (long int)timeSeconds);
                 }
             }
             lcd_clear();
@@ -343,11 +332,12 @@ int compute_pwm(pid_t *pid) {
     pid->D = Kd * (eps - pid->old_eps);
     pid->old_eps = eps;
     
-    if ( (MIN_PWM_PRC < pid->U) && (pid->U < MAX_PWM_PRC) )
-        pid->I += Ki * eps;
-    
     if (fabs(pid->I) > MAX_I)
         pid->I = MAX_I * ((pid->I > 0) ? 1 : -1);
+    
+    double tempU = pid->P + pid->I + pid->D;
+    if ( (MIN_PWM_PRC < tempU) && (tempU < MAX_PWM_PRC) )
+        pid->I += Ki * eps;
     
     pid->U = pid->P + pid->I + pid->D;
     
