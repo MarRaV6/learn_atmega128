@@ -10,9 +10,9 @@
 
 // Коэффициенты PID
 #define Kp  1.5
-#define Ki  0.25
-#define Kd  0 // 5
-#define MAX_I 50
+#define Ki  0.15
+#define Kd  250
+#define MAX_I 30
 
 // АЦП
 // Voltage Reference: AVCC pin
@@ -29,7 +29,7 @@
 
 // Serial
 #define BOUDRATE 9600
-#define SERIAL_BUFF_SIZE 50
+#define SERIAL_BUFF_SIZE 250
 
 // Максимальная температура уставки
 #define MAX_TARGET 120
@@ -50,7 +50,6 @@ typedef struct {
 } pid_t;
 
 void key_pressed_out(void);
-void send_serial_data(int target, float temp, float filtered_temp);
 int compute_pwm(pid_t *pid);
 
 void lcd_com(unsigned char p);
@@ -215,6 +214,13 @@ void preparations(void){
     adc_init(ADC_PIN); // подключим АЦП к выводу PF3
 }
 
+void send_serial_data(int target, float filtered_temp, pid_t* pid, uint16_t pwm_load) {
+    char serial_buff[SERIAL_BUFF_SIZE];
+                                     // time, target, ftemp, U, P, I, D, pwm
+    snprintf(serial_buff, SERIAL_BUFF_SIZE, "%li;%i;%0.2f;%0.2f;%0.2f;%0.2f;%0.2f;%i", (long int)timeMillis, target, filtered_temp, pid->U, pid->P, pid->I, pid->D, pwm_load);
+    usart_println(serial_buff);
+}
+
 
 int main(void) {
     // глобально запретим прерывания
@@ -245,8 +251,6 @@ int main(void) {
             // переведем в градусы Цельсия
             temp = -0.0000002890253 * pow(tempADC, 4) + 0.0004360764 * pow(tempADC, 3) - 0.2463599 * pow(tempADC, 2) + 62.25780 * tempADC - 5923.901;
             float ftemp = kalman_filter(&filtered_k, temp);  // отфильтруем
-
-            send_serial_data(target, temp, ftemp);  // отправим данные в порт
         
             clear_line(upper_line, SCR_LEN);
             clear_line(lower_line, SCR_LEN);
@@ -274,6 +278,8 @@ int main(void) {
             PID.eps = (double)(target - ftemp);
             pwm_load = compute_pwm(&PID);
             PWM_OCR = (uint16_t)(pwm_load * 10.23);  // изменим широту импулься PWM
+            
+            send_serial_data(target, ftemp, &PID, pwm_load);  // отправим данные в порт
         }
     }
 }
@@ -316,12 +322,6 @@ void key_pressed_out(void){
     } break;
 
   }
-}
-
-void send_serial_data(int target, float temp, float filtered_temp) {
-     char serial_buff[SERIAL_BUFF_SIZE];
-     snprintf(serial_buff, SERIAL_BUFF_SIZE, "%li;%i;%0.2f;%0.2f", (long int)timeMillis, target, temp, filtered_temp);
-     usart_println(serial_buff);
 }
 
 // Расчет PID
